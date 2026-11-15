@@ -1,0 +1,9 @@
+# Data snapshots contain real app data - local only.
+# Schema history (apps/*/schema/) IS committed so schema changes are diffable.
+apps/*/snapshots/
+apps/*/.env
+apps/*/sync.env
+# Oracle ADB wallet (copied from OracleDBTest/Tools/keys/OracleDBWallet)
+oracle-wallet/
+apps/*/replica.env
+apps/*/FAILED_OVER

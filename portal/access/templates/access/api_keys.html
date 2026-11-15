@@ -1,0 +1,49 @@
+{% extends 'access/base.html' %}
+{% block title %}API keys - Arcore Portal{% endblock %}
+{% block content %}
+<h1>API keys</h1>
+<p class="sub">One key reaches every app you can open, through the Fleet MCP gateway. It acts as you: the same apps, the same permissions, and revoking it here (or losing access) stops it within 15 seconds.</p>
+
+{% if new_key %}
+<section class="panel">
+  <div class="panel-head"><strong>Your new key</strong><span class="note">Shown once. Store it in a password manager or secret store.</span></div>
+  <div class="panel-body">
+    <p><code class="secret">{{ new_key }}</code></p>
+    <p class="note">Add it to Claude Code:</p>
+    <pre class="snippet">claude mcp add --transport http arcorefleet {{ mcp_url }} \
+  --header "Authorization: Bearer {{ new_key }}"</pre>
+  </div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head"><strong>Create a key</strong></div>
+  <div class="panel-body">
+    <form method="post" class="inline">
+      {% csrf_token %}<input type="hidden" name="action" value="create">
+      <label for="key-name">Name</label>
+      <input id="key-name" type="text" name="name" maxlength="100" required placeholder="Claude Code on fleet-worker">
+      <button class="btn" type="submit">Create key</button>
+    </form>
+    <p class="note">Gateway: <code>{{ mcp_url }}</code> - reachable only from devices on the Arcore tailnet (install Tailscale and sign in).</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><strong>{% if user.is_staff %}All keys{% else %}Your keys{% endif %}</strong></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Name</th>{% if user.is_staff %}<th>Owner</th>{% endif %}<th>Key</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+      <tbody>{% for key in keys %}<tr>
+        <td>{{ key.name }}</td>
+        {% if user.is_staff %}<td>{{ key.user.email }}</td>{% endif %}
+        <td><code>{{ key.hint }}…</code></td>
+        <td>{{ key.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ key.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
+        <td>{% if key.active %}<span class="badge">active</span>{% else %}<span class="badge">revoked {{ key.revoked_at|date:"Y-m-d" }}</span>{% endif %}</td>
+        <td>{% if key.active %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="revoke"><input type="hidden" name="key" value="{{ key.pk }}"><button class="btn ghost" type="submit">Revoke</button></form>{% endif %}</td>
+      </tr>{% empty %}<tr><td colspan="7" class="note">No keys yet.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

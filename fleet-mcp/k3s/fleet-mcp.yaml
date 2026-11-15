@@ -1,0 +1,99 @@
+# Fleet MCP gateway - one API key (from the Arcore Portal) for every fleet app
+# the key's owner can open. Tailnet only:
+#   http://fleet-control.example-tailnet.ts.net:8880/mcp
+# Prerequisite: phase1-network-ingress/traefik/dynamic/fleet-mcp.yml on fleet-control.
+#
+# Secret (never committed), created once - see fleet-mcp/README.md:
+#   fleet-mcp-env   FLEET_MCP_SHARED_SECRET (same value as in portal-env), FLEET_SIGNING_KEY (RSA private key PEM)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleet-mcp
+  namespace: apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fleet-mcp
+  template:
+    metadata:
+      labels:
+        app: fleet-mcp
+    spec:
+      containers:
+        - name: fleet-mcp
+          image: 192.0.2.10:30500/fleet-mcp:latest # CI pins this to the commit sha
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PORTAL_URL
+              value: "http://portal.apps.svc.cluster.local"
+            - name: FLEET_TOKEN_ISSUER
+              value: "https://mcp.example.com" # an identifier the apps check, not a URL that is served
+            - name: FLEET_ALLOWED_HOSTS
+              value: "fleet-control.example-tailnet.ts.net:*"
+          envFrom:
+            - secretRef:
+                name: fleet-mcp-env
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+---
+# In-cluster address too: apps fetch /.well-known/jwks.json from here to verify fleet tokens.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet-mcp
+  namespace: apps
+spec:
+  selector:
+    app: fleet-mcp
+  ports:
+    - port: 80
+      targetPort: 8000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fleet-mcp
+  namespace: apps
+  annotations:
+    # Tailnet source addresses only - see phase1-network-ingress/traefik/dynamic/fleet-mcp.yml.
+    # No portal-auth: callers are programs; the gateway checks API keys with the portal itself.
+    traefik.ingress.kubernetes.io/router.middlewares: fleet-mcp-tailnet@file
+spec:
+  ingressClassName: traefik
+  rules:
+    # The tailnet (MagicDNS) name of fleet-control, where Traefik listens on :8880. Cloudflare only
+    # routes *.example.com names into the tunnel, so this host is never reached from the internet.
+    - host: fleet-control.example-tailnet.ts.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fleet-mcp
+                port:
+                  number: 80

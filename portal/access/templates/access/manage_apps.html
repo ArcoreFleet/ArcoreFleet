@@ -1,0 +1,38 @@
+{% extends 'access/base.html' %}
+{% block title %}Applications - Arcore Portal{% endblock %}
+{% block content %}
+<h1>Applications</h1>
+<p class="sub">Apps the portal knows about. The hostname must match the app's Ingress host; the Ingress opts in to access checks with the <code>portal-auth@file</code> middleware.</p>
+
+<div class="panel">
+  <div class="scroll">
+    <table>
+      <thead><tr><th>App</th><th>Hostname</th><th class="c">Users</th><th class="c">Status</th><th></th></tr></thead>
+      <tbody>
+        {% for app in apps %}
+        <tr>
+          <td><span class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{{ app.color }};margin-right:8px"></span>{{ app.icon }} <strong>{{ app.name }}</strong></td>
+          <td><a href="{{ app.url }}">{{ app.hostname }}</a></td>
+          <td class="c">{{ app.users.count }}</td>
+          <td class="c">{% if app.is_active %}<span class="badge">active</span>{% else %}<span class="badge">inactive</span>{% endif %}</td>
+          <td class="c"><a href="{% url 'edit_app' app.pk %}">Edit</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="note">None yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><strong>Register an application</strong></div>
+  <div class="panel-body">
+    <form method="post">
+      {% csrf_token %}
+      {% include 'access/app_fields.html' %}
+      <div class="actions"><button class="btn" type="submit">Register</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

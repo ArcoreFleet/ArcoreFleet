@@ -1,0 +1,21 @@
+{% extends 'access/base.html' %}
+{% block title %}Hub app provisioning - Arcore Portal{% endblock %}
+{% block content %}
+<h1>Hub app provisioning <span class="badge">admin only</span></h1>
+<p class="sub">Assign desktop apps to individual customer accounts. Customers see only their own active assignments in the ArcoreHub tile.</p>
+<p><a href="{% url 'hub' %}">Back to ArcoreHub</a></p>
+<section class="panel"><div class="panel-head"><strong>Provision an app</strong></div><div class="panel-body">
+<form method="post" class="stacked">{% csrf_token %}<input type="hidden" name="action" value="grant">{{ provision_form.as_p }}<button class="btn" type="submit">Provision app</button></form>
+</div></section>
+<section class="panel"><div class="panel-head"><strong>Customer assignments</strong></div><div class="scroll"><table>
+<thead><tr><th>Customer</th><th>App</th><th>Status</th><th>Action</th></tr></thead><tbody>
+{% for row in assignments %}<tr><td>{{ row.user.email|default:row.user.username }}</td><td>{{ row.application.name }}</td><td>{% if row.is_active and row.application.is_active %}Provisioned{% else %}Inactive{% endif %}</td><td>{% if row.is_active %}<form method="post" action="{% url 'hub_revoke' row.pk %}">{% csrf_token %}<button class="btn" type="submit">Revoke assignment</button></form>{% endif %}</td></tr>{% empty %}<tr><td colspan="4">No assignments yet.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel"><div class="panel-head"><strong>Register a Hub app</strong></div><div class="panel-body">
+<p class="note">Registers an app in the provisioning catalog. This does not upload or authorize executable packages.</p>
+<form method="post" class="stacked">{% csrf_token %}<input type="hidden" name="action" value="register">{{ app_form.as_p }}<button class="btn" type="submit">Register app</button></form>
+</div></section>
+<section class="panel"><div class="panel-head"><strong>Recent provisioning history</strong></div><div class="panel-body">
+{% for event in events %}<p>{{ event.created_at|date:"Y-m-d H:i" }} · {{ event.actor.username|default:"Deleted admin" }} · {{ event.action }} · {{ event.provision.application.name }} · {{ event.provision.user.username }}</p>{% empty %}<p>No changes yet.</p>{% endfor %}
+</div></section>
+{% endblock %}

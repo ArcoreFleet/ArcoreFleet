@@ -1,0 +1,87 @@
+# Builds and deploys the portal (portal/) with the Phase 5 pipeline.
+# Repo secrets: TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET, KUBE_CONFIG_CI.
+
+name: Portal - build and deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["portal/**", "docs/examples/workflows/portal.yml"]
+
+concurrency:
+  group: portal-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: 192.0.2.10:30500/portal
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test portal and website manager before deployment
+        run: |
+          pip install -r portal/requirements.txt
+          cd portal
+          python manage.py test access website hubauthority --noinput
+
+      - name: Join tailnet
+        # v2 ran `sudo -E tailscale up`; current runners ignore -E, so the auth key
+        # never reached tailscale and the step failed. v4 passes it directly.
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+          tags: tag:ci
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+          buildkitd-config: portal/phase5-buildkitd.toml
+
+      - name: Build and push
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t $IMAGE:${{ github.sha }} -t $IMAGE:latest --push portal
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Deploy to K3s
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_CI }}" | base64 -d > ~/.kube/config
+          kubectl -n apps set image deployment/portal portal=$IMAGE:${{ github.sha }}
+          kubectl -n apps rollout status deployment/portal --timeout=180s
+
+      # CI has deployment-update permissions only; installing the credential and
+      # worker remains an explicit infrastructure setup step.
+      - name: Update the website worker, if installed
+        run: |
+          found=$(kubectl -n apps get deployment portal-website --ignore-not-found -o name)
+          if [ -z "$found" ]; then
+            echo "::warning::Website automatic refresh is unavailable: install the worker and its GitHub App Secret as described in portal/WEBSITE.md."
+            exit 0
+          fi
+          kubectl -n apps set image deployment/portal-website website=$IMAGE:${{ github.sha }}
+          kubectl -n apps rollout status deployment/portal-website --timeout=180s
+
+      - name: Update the ArcoreHub control plane, if installed
+        run: |
+          found=$(kubectl -n apps get deployment hub-authority --ignore-not-found -o name)
+          if [ -z "$found" ]; then
+            echo "::notice::The ArcoreHub control plane is not installed; see portal/README.md (ArcoreHub authority)."
+            exit 0
+          fi
+          kubectl -n apps set image deployment/hub-authority hub-authority=$IMAGE:${{ github.sha }}
+          kubectl -n apps rollout status deployment/hub-authority --timeout=180s

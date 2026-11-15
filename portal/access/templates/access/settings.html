@@ -1,0 +1,34 @@
+{% extends 'access/base.html' %}
+{% block title %}Fleet settings - Arcore Portal{% endblock %}
+{% block content %}
+<h1>Fleet settings</h1>
+<p class="sub">Manage observation settings and portal access. <a href="{% url 'operations' %}">Open Fleet dashboard</a>.</p>
+<section class="panel">
+  <div class="panel-head"><strong>Automatic polling</strong></div>
+  <div class="panel-body">
+    <form method="post" action="{% url 'poll_interval' %}" class="inline">
+      {% csrf_token %}<label for="poll-interval">Polling interval</label>
+      <select id="poll-interval" name="interval"><option value="5" {% if poll.interval_minutes == 5 %}selected{% endif %}>5 minutes</option><option value="10" {% if poll.interval_minutes == 10 %}selected{% endif %}>10 minutes</option></select>
+      <button class="btn" type="submit">Save interval</button>
+    </form>
+    <p class="note">The dashboard's Poll now button requests an immediate snapshot. Database values follow the existing hourly collector's source timestamp.</p>
+  </div>
+</section>
+<section class="panel">
+  <div class="panel-head"><strong>Monitored servers</strong><a class="btn ghost" href="{% url 'add_server' %}">Add server</a></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Server</th><th>Metrics endpoint</th><th>Filesystems</th><th>Status</th><th></th></tr></thead>
+      <tbody>{% for server in servers %}<tr>
+        <td>{{ server.name }}</td><td>{{ server.metrics_url }}</td><td>{{ server.mountpoints }}</td>
+        <td>{% if server.enabled %}Enabled{% else %}Disabled{% endif %}{% if server.database_metrics %} · Oracle report{% endif %}</td>
+        <td><a href="{% url 'edit_server' server.pk %}">Configure {{ server.name }}</a></td>
+      </tr>{% empty %}<tr><td colspan="5" class="note">No servers configured. Add a private metrics endpoint to start observing a host.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+<section class="panel">
+  <div class="panel-head"><strong>Applications and access</strong></div>
+  <div class="panel-body inline"><a class="btn ghost" href="{% url 'manage_apps' %}">Applications &amp; environments</a><a class="btn ghost" href="{% url 'manage_users' %}">Users &amp; access</a></div>
+</section>
+{% endblock %}

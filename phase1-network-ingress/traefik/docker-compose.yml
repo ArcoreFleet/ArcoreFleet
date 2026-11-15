@@ -1,0 +1,17 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    restart: unless-stopped
+    # Host networking: the default bridge network can't reliably reach the
+    # host's tailscale0 interface (a known Docker+Tailscale interaction),
+    # which the Kubernetes Ingress provider needs to reach the K3s API.
+    # Host networking also means entryPoint addresses below bind directly
+    # on the host - no "ports:" mapping needed or available.
+    network_mode: host
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+      - ./k8s-ca.crt:/etc/traefik/k8s-ca.crt:ro
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"

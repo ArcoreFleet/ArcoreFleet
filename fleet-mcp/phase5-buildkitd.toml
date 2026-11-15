@@ -1,0 +1,4 @@
+# BuildKit refuses to push to a plain-HTTP registry by default (Phase 3/5).
+[registry."192.0.2.10:30500"]
+  http = true
+  insecure = true

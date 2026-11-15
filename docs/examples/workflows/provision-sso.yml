@@ -1,0 +1,57 @@
+name: Provision application SSO
+on:
+  pull_request:
+    paths: ['sso/**', 'docs/examples/workflows/provision-sso.yml']
+  push:
+    branches: [main]
+    paths: ['sso/**', 'docs/examples/workflows/provision-sso.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fleet-sso
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests==2.32.5
+      - run: python -m unittest discover -s sso/tests -v
+      - run: python sso/provision.py
+  apply:
+    if: github.event_name != 'pull_request' && vars.FLEET_SSO_ENABLED == 'true'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests==2.32.5
+      - uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+          tags: tag:ci
+      - uses: azure/setup-kubectl@v4
+      - name: Configure cluster access
+        env:
+          KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
+        run: |
+          umask 077
+          mkdir -p ~/.kube
+          printf '%s' "$KUBE_CONFIG_CI" | base64 -d > ~/.kube/config
+      - name: Reconcile SSO registrations and application settings
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: python sso/provision.py --apply
+      - name: Remove cluster credentials
+        if: always()
+        run: rm -f ~/.kube/config
+

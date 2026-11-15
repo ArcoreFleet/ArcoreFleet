@@ -1,0 +1,52 @@
+# Least-privilege identity for CI: can only read/update Deployments
+# (and the Pods/ReplicaSets needed to check rollout status) inside the
+# "apps" namespace. Not cluster-admin, not even namespace-admin - CI
+# cannot touch Postgres/Redis/the registry/Portainer or any other
+# namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployer
+  namespace: apps
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deployer
+  namespace: apps
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-deployer
+  namespace: apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ci-deployer
+subjects:
+  - kind: ServiceAccount
+    name: ci-deployer
+    namespace: apps
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-deployer-token
+  namespace: apps
+  annotations:
+    kubernetes.io/service-account.name: ci-deployer
+type: kubernetes.io/service-account-token

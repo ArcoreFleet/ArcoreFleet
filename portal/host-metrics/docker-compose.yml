@@ -1,0 +1,31 @@
+services:
+  exporter:
+    image: ${FLEET_NODE_EXPORTER_IMAGE}
+    container_name: fleet-node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    user: '65534:65534'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.10
+    volumes:
+      - /:/host:ro,rslave
+      - ${FLEET_TEXTFILE_DIR}:/textfile:ro
+    command:
+      - --web.listen-address=${FLEET_METRICS_BIND_IP}:9100
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.filesystem
+      - --collector.uname
+      - --collector.textfile
+      - --collector.textfile.directory=/textfile
+      - --collector.filesystem.mount-points-include=^/$$
+    labels:
+      com.arecore.fleet.component: host-metrics

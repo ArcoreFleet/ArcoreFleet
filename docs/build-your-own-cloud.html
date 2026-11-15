@@ -1,0 +1,337 @@
+<title>Build Your Own Cloud</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap">
+<style>
+  :root{
+    --ink:#14213B;
+    --ink-soft:#3C4A68;
+    --paper:#EFF3F1;
+    --panel:#FFFFFF;
+    --line:#D8E0DC;
+    --blue:#2B6CB0;
+    --blue-soft:#E4EEF7;
+    --amber:#B9770E;
+    --amber-soft:#FBF0DD;
+    --green:#2F7A4D;
+    --green-soft:#E7F3EA;
+    --red:#B3412C;
+    --red-soft:#FBEAE5;
+    --mono-bg:#101A2E;
+    --mono-ink:#DCE6F2;
+    --shadow: 0 1px 2px rgba(20,33,59,0.06), 0 8px 24px rgba(20,33,59,0.06);
+  }
+  :root:not([data-theme="light"]){
+    @media (prefers-color-scheme: dark){
+      --ink:#E7ECF3;
+      --ink-soft:#AEB9CC;
+      --paper:#0F1626;
+      --panel:#161F35;
+      --line:#2A3650;
+      --blue:#7FB0E8;
+      --blue-soft:#1C2C46;
+      --amber:#E3A33E;
+      --amber-soft:#30260F;
+      --green:#74C290;
+      --green-soft:#162A1E;
+      --red:#E08571;
+      --red-soft:#331A15;
+      --mono-bg:#0A1120;
+      --mono-ink:#D7E2F0;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#E7ECF3;
+    --ink-soft:#AEB9CC;
+    --paper:#0F1626;
+    --panel:#161F35;
+    --line:#2A3650;
+    --blue:#7FB0E8;
+    --blue-soft:#1C2C46;
+    --amber:#E3A33E;
+    --amber-soft:#30260F;
+    --green:#74C290;
+    --green-soft:#162A1E;
+    --red:#E08571;
+    --red-soft:#331A15;
+    --mono-bg:#0A1120;
+    --mono-ink:#D7E2F0;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  body{
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Sans 3", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    padding: 0 16px;
+    padding-block: 28px 64px;
+  }
+  .wrap{ max-width: 760px; margin: 0 auto; }
+  h1,h2,h3{ font-family: "Newsreader", Georgia, "Times New Roman", serif; font-weight: 600; text-wrap: balance; color: var(--ink); }
+  h1{ font-size: clamp(2rem, 5vw, 2.8rem); line-height:1.1; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2{ font-size: clamp(1.4rem, 3.4vw, 1.75rem); margin: 0 0 4px; }
+  h3{ font-size: 1.15rem; margin: 0 0 6px; }
+  p{ margin: 0 0 14px; max-width: 65ch; }
+  .lede{ font-size: 1.1rem; color: var(--ink-soft); max-width: 60ch; }
+  .mono{ font-family: "Space Mono", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; }
+  a{ color: var(--blue); text-decoration-thickness: 1.5px; }
+
+  header.top{ padding-block: 8px 20px; border-bottom: 1px solid var(--line); margin-bottom: 28px; }
+  .eyebrow{ font-family:"Space Mono",monospace; font-size:.75rem; letter-spacing:.12em; text-transform:uppercase; color: var(--amber); margin-bottom: 10px; }
+
+  nav.toc{
+    display:flex; flex-wrap:wrap; gap:8px 10px;
+    margin: 20px 0 8px; padding: 14px 16px;
+    background: var(--panel); border:1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--shadow);
+  }
+  nav.toc a{
+    font-size:.86rem; color: var(--ink-soft); text-decoration:none;
+    padding: 4px 10px; border-radius: 999px; border:1px solid var(--line);
+    white-space: nowrap;
+  }
+  nav.toc a:hover{ color: var(--blue); border-color: var(--blue); }
+
+  section{ margin: 40px 0; scroll-margin-top: 12px; }
+
+  .sheet{
+    background: var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding: 22px 24px; box-shadow: var(--shadow); margin-bottom: 18px;
+  }
+  .step-head{ display:flex; align-items:baseline; gap:14px; margin-bottom: 10px; }
+  .step-num{
+    font-family:"Space Mono",monospace; font-size:.95rem; color: var(--amber);
+    border: 1px solid var(--amber); border-radius: 999px; width:34px; height:34px;
+    display:flex; align-items:center; justify-content:center; flex: none;
+  }
+  .tag-row{ display:flex; gap:8px; flex-wrap:wrap; margin: 10px 0 2px; }
+  .tag{ font-family:"Space Mono",monospace; font-size:.72rem; letter-spacing:.03em; padding:3px 9px; border-radius:6px; }
+  .tag.cost0{ background: var(--green-soft); color: var(--green); }
+  .tag.cost{ background: var(--amber-soft); color: var(--amber); }
+  .tag.skill{ background: var(--blue-soft); color: var(--blue); }
+
+  .analogy{
+    border-left: 3px solid var(--blue); background: var(--blue-soft);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 14px 0;
+    font-size:.96rem; color: var(--ink);
+  }
+  .analogy b{ color: var(--blue); }
+
+  .callout{ border-radius: 10px; padding: 14px 18px; margin: 16px 0; border:1px solid var(--line); }
+  .callout.warn{ background: var(--red-soft); border-color: transparent; }
+  .callout.good{ background: var(--green-soft); border-color: transparent; }
+  .callout h4{ margin:0 0 6px; font-family:"Source Sans 3",sans-serif; font-weight:700; font-size:.95rem; }
+  .callout.warn h4{ color: var(--red); }
+  .callout.good h4{ color: var(--green); }
+  .callout p{ margin:0; font-size:.94rem; }
+
+  table{ width:100%; border-collapse: collapse; margin: 10px 0; }
+  caption{ text-align:left; font-size:.82rem; color:var(--ink-soft); margin-bottom:6px; }
+  th,td{ text-align:left; padding: 9px 10px; border-bottom:1px solid var(--line); font-size:.94rem; vertical-align:top; }
+  th{ font-family:"Space Mono",monospace; font-size:.72rem; letter-spacing:.04em; text-transform:uppercase; color: var(--ink-soft); }
+  td.amt{ font-family:"Space Mono",monospace; text-align:right; white-space:nowrap; }
+  tfoot td{ border-bottom:none; border-top: 2px solid var(--ink); font-weight:700; }
+
+  .glossary dl{ display:grid; grid-template-columns: minmax(120px,160px) 1fr; gap: 10px 18px; margin:0; }
+  .glossary dt{ font-family:"Space Mono",monospace; font-weight:700; color: var(--blue); font-size:.88rem; }
+  .glossary dd{ margin:0 0 6px; }
+  @media (max-width: 520px){
+    .glossary dl{ grid-template-columns: 1fr; }
+    .glossary dt{ margin-top: 10px; }
+  }
+
+  .checklist{ list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+  .checklist li{ display:flex; gap:10px; align-items:flex-start; font-size:.96rem; }
+  .checklist li::before{ content:"☐"; color: var(--amber); flex:none; margin-top:1px; }
+
+  pre.mermaid{ background: transparent; }
+
+  footer{ margin-top: 48px; padding-top: 18px; border-top:1px solid var(--line); color: var(--ink-soft); font-size:.86rem; }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">A plain-language blueprint</div>
+  <h1>Build Your Own Cloud</h1>
+  <p class="lede">How a small business can run its own apps and websites safely — using a spare computer, one cheap cloud server, and mostly free tools — without hiring an IT department or paying for expensive hosting.</p>
+</header>
+
+<nav class="toc" aria-label="Table of contents">
+  <a href="#picture">The big picture</a>
+  <a href="#need">What you'll need</a>
+  <a href="#steps">The steps</a>
+  <a href="#cost">What it costs</a>
+  <a href="#secure">Staying secure</a>
+  <a href="#ahead">Looking ahead</a>
+  <a href="#glossary">Glossary</a>
+  <a href="#help">Getting help</a>
+</nav>
+
+<section id="picture">
+  <h2>The big picture</h2>
+  <p>Most small businesses either pay a hosting company a recurring fee for every website or tool they run, or they let apps live on whatever computer happens to be handy, with no real plan for security. There's a third option: connect a computer you already own to a free-tier cloud server, using free tools originally built for large tech companies, and get something more secure and more reliable than most paid small-business hosting — for the cost of a domain name.</p>
+
+  <p>Here's the shape of it, in order of how a visitor's request actually travels:</p>
+
+  <pre class="mermaid">
+flowchart LR
+    visitor["A customer or employee<br/>types yourapp.yourbusiness.com"]
+    cf["Cloudflare<br/>(checks who's allowed in)"]
+    tunnel["A locked, one-way tunnel<br/>out of your server"]
+    router["The traffic director<br/>on your server"]
+    app["Your actual app<br/>or website"]
+
+    visitor --> cf --> tunnel --> router --> app
+  </pre>
+
+  <p>Nothing about your server is ever exposed directly to the internet. Nobody can "find" it and try to break in, because there is no door for them to find — only a one-way tunnel your own server opens outward, the same way your phone can receive text messages without anyone needing to dial a number straight into it.</p>
+
+  <div class="analogy">
+    <b>Think of it like a storefront with a locked back office.</b> Customers walk in the front door (your website address), a receptionist checks they're allowed where they're going (Cloudflare), and are shown to the right room (the traffic director). Staff reach the back office — the stuff customers never see — through a private hallway that doesn't connect to the street at all (your private network).
+  </div>
+</section>
+
+<section id="need">
+  <h2>What you'll need</h2>
+  <ul class="checklist">
+    <li>A domain name you own — e.g. <span class="mono">yourbusiness.com</span> — typically $10-20 a year from any registrar</li>
+    <li>One computer you already own that can stay turned on (an old office PC works fine)</li>
+    <li>One free-tier cloud server — Oracle Cloud's "Always Free" tier gives you a real server, for real, forever, at $0/month</li>
+    <li>A free Cloudflare account</li>
+    <li>A free Tailscale account</li>
+    <li>Comfort following written technical instructions, or a freelancer who is (see <a href="#help">Getting Help</a>)</li>
+  </ul>
+</section>
+
+<section id="steps">
+  <h2>The steps</h2>
+  <p>Each step below builds on the last. None of them require you to open anything on your office router or buy a traditional web hosting plan.</p>
+
+  <div class="sheet">
+    <div class="step-head"><span class="step-num">1</span><h3>Point your domain at Cloudflare</h3></div>
+    <div class="tag-row"><span class="tag cost0">$0</span><span class="tag skill">15 min, mostly clicking</span></div>
+    <p>A domain name is just a sign-up sheet that tells the internet which computer to send visitors to. Right now that sheet lives with whoever you bought the domain from. You move it to Cloudflare — a company that provides the next few steps for free — by changing two settings at your registrar.</p>
+    <div class="analogy">It's the same as updating your business's forwarding address with the post office. The business doesn't move. Mail just gets redirected.</div>
+    <div class="callout warn">
+      <h4>Don't lose your email or website</h4>
+      <p>If you already have a website or business email, have whoever manages your domain double-check every existing setting gets copied over <em>before</em> you flip the switch. This is the one step worth paying a professional an hour for if you're not confident — undoing a mistake here can mean a day of lost email.</p>
+    </div>
+  </div>
+
+  <div class="sheet">
+    <div class="step-head"><span class="step-num">2</span><h3>Connect your computers with a private network</h3></div>
+    <div class="tag-row"><span class="tag cost0">$0</span><span class="tag skill">10 min per computer</span></div>
+    <p>Install Tailscale on your office computer and on your cloud server. It quietly connects them into their own private network — as if you ran a cable directly between your office and the cloud, except the "cable" is encrypted and works from anywhere.</p>
+    <div class="analogy">This is a <b>private hallway</b>, not a public road. Only computers you've personally approved can ever walk down it. The public internet can't see it exists.</div>
+  </div>
+
+  <div class="sheet">
+    <div class="step-head"><span class="step-num">3</span><h3>Install a traffic director</h3></div>
+    <div class="tag-row"><span class="tag cost0">$0</span><span class="tag skill">20 min</span></div>
+    <p>One piece of software, called a reverse proxy, sits in front of all your apps and sends each visitor to the right one based on the address they typed — <span class="mono">invoices.yourbusiness.com</span> goes to your invoicing app, <span class="mono">shop.yourbusiness.com</span> goes to your storefront. You run one of these, not one per app.</p>
+    <div class="analogy">It's a <b>receptionist</b> standing at the one door everyone walks through, pointing each visitor to the right office.</div>
+  </div>
+
+  <div class="sheet">
+    <div class="step-head"><span class="step-num">4</span><h3>Open a one-way tunnel to the outside world</h3></div>
+    <div class="tag-row"><span class="tag cost0">$0</span><span class="tag skill">15 min</span></div>
+    <p>Normally, putting something on the internet means opening a "door" on your server that anyone can knock on — which is exactly what attackers scan the internet looking for, all day, every day. Instead, your server makes an outbound-only connection to Cloudflare and keeps it open. The public internet is handed to Cloudflare, who relays it down that tunnel. Your server never accepts an incoming connection from a stranger.</p>
+    <div class="analogy">Think of a <b>mail slot versus a front door</b>. A mail slot only ever pushes things one way through a small, controlled opening. There's no doorknob on the outside for anyone to try.</div>
+  </div>
+
+  <div class="sheet">
+    <div class="step-head"><span class="step-num">5</span><h3>Require a login — using accounts your team already has</h3></div>
+    <div class="tag-row"><span class="tag cost0">$0 for small teams</span><span class="tag skill">30-45 min</span></div>
+    <p>For anything that shouldn't be fully public — an internal tool, a client portal, admin screens — add a rule that says "only people who sign in with an approved Google or Microsoft account get through." Nobody needs a new password; they use the same Google or Microsoft 365 login they already have. You simply give Cloudflare a list of approved emails (or approve an entire company email domain at once).</p>
+    <div class="analogy">It's a <b>guest list at the door</b>, checked against an ID your visitors already carry, instead of a new key you'd have to hand out and track.</div>
+  </div>
+
+  <div class="sheet">
+    <div class="step-head"><span class="step-num">6</span><h3>Get a dashboard, so you're not stuck typing commands</h3></div>
+    <div class="tag-row"><span class="tag cost0">$0</span><span class="tag skill">15 min</span></div>
+    <p>Install Portainer, a web dashboard for seeing and managing everything running on your server(s) with clicks instead of typed commands. It's genuinely useful day-to-day — and genuinely powerful, which is exactly why it's kept reachable <em>only</em> over the private network from Step 2, never from the public internet. A tool with this much control over your systems should never sit behind nothing but a login page on the open web.</p>
+    <div class="callout warn">
+      <h4>The one mistake to avoid</h4>
+      <p>It's tempting to route a dashboard like this through Step 4's public tunnel for convenience. Don't. Keep every admin tool reachable only through your private network (Step 2). If you ever do want it reachable from outside your office, put it behind the login gate from Step 5 first — never leave it open on its own.</p>
+    </div>
+  </div>
+</section>
+
+<section id="cost">
+  <h2>What it costs</h2>
+  <p>Compared to a managed VPN appliance, a traditional web host, and separate login/security software, the total ongoing cost of this setup is close to nothing — most of it is free-tier cloud and open-source software that happens to be excellent.</p>
+  <table>
+    <caption>Typical annual cost for a small business, 1-10 staff</caption>
+    <thead><tr><th>Item</th><th>Typical cost</th></tr></thead>
+    <tbody>
+      <tr><td>Domain name</td><td class="amt">$10 – $20 / yr</td></tr>
+      <tr><td>Cloud server (Oracle "Always Free" tier)</td><td class="amt">$0</td></tr>
+      <tr><td>Private network (Tailscale, up to 100 devices)</td><td class="amt">$0</td></tr>
+      <tr><td>Domain protection, tunnel, and DNS (Cloudflare)</td><td class="amt">$0</td></tr>
+      <tr><td>Login gate for your team (Cloudflare Access, up to 50 people)</td><td class="amt">$0</td></tr>
+      <tr><td>Traffic director &amp; dashboard software</td><td class="amt">$0</td></tr>
+    </tbody>
+    <tfoot><tr><td>Typical total</td><td class="amt">$10 – $20 / yr</td></tr></tfoot>
+  </table>
+  <p>Two optional upgrades, only if you need them: a second-level address like <span class="mono">app.dev.yourbusiness.com</span> costs about $120/year extra (or just register a second cheap domain instead — often cheaper below a dozen or so); and once your team passes about 50 people, Cloudflare's login gate becomes a paid seat-based add-on.</p>
+</section>
+
+<section id="secure">
+  <h2>Staying secure</h2>
+  <div class="callout good">
+    <h4>What makes this safer than it sounds</h4>
+    <p>No port is ever opened to the public internet on any of your own machines. Every public request is checked by Cloudflare first. Admin tools are reachable only from your own private network. Your public website and business email are left completely untouched by any of this — they keep working exactly as they do today.</p>
+  </div>
+  <p>Three habits matter more than any specific tool:</p>
+  <ul class="checklist">
+    <li>Never expose an admin tool (dashboards, databases, management panels) to the public internet "for convenience" — reach it over your private network instead</li>
+    <li>Keep a written, dated list of every password, access key, and login you set up — store it somewhere only your team can reach, never in an email or shared chat</li>
+    <li>Review who has access every few months, and remove anyone who's left the business the same day they leave</li>
+  </ul>
+</section>
+
+<section id="ahead">
+  <h2>Looking ahead</h2>
+  <p>Everything above gets a business safely online. As you grow, three more pieces are worth adding, in this order:</p>
+  <ul class="checklist">
+    <li><b>A shared database</b> — one well-backed-up place for all your apps to store information, instead of each app keeping its own</li>
+    <li><b>A repeatable template</b> — so adding your 2nd, 10th, or 50th internal app takes an afternoon, not a redesign</li>
+    <li><b>Automatic deployment</b> — so updating an app is "save and walk away" instead of a manual server visit</li>
+  </ul>
+  <p>None of these are urgent for a business running a handful of tools. They start paying off once you're running many.</p>
+</section>
+
+<section id="glossary">
+  <h2>Glossary</h2>
+  <div class="glossary">
+    <dl>
+      <dt>Domain name</dt><dd>The address people type, like <span class="mono">yourbusiness.com</span>. You rent it yearly; you never fully "own" it.</dd>
+      <dt>DNS</dt><dd>The internet's phone book — it turns a domain name into the actual location of a server.</dd>
+      <dt>Cloud server</dt><dd>A computer you rent by the month (or, here, for free) that lives in a data center instead of your office.</dd>
+      <dt>Private network / mesh</dt><dd>A network only your own approved devices can join, regardless of where in the world each one physically is.</dd>
+      <dt>Reverse proxy</dt><dd>Software that receives every visitor and decides which app should actually handle them.</dd>
+      <dt>Tunnel</dt><dd>An outbound-only connection that lets your server be reached without ever accepting an unsolicited inbound connection.</dd>
+      <dt>SSO (single sign-on)</dt><dd>Letting people log in with an account they already have (Google, Microsoft) instead of creating yet another password.</dd>
+      <dt>Container</dt><dd>A small, self-contained package that an app runs inside — like a shipping container, the same box works on any truck, ship, or server.</dd>
+      <dt>Cluster</dt><dd>Several servers working together and sharing the load, managed as if they were one.</dd>
+    </dl>
+  </div>
+</section>
+
+<section id="help">
+  <h2>Getting help</h2>
+  <p>Every step above can be done by a motivated non-technical owner willing to follow instructions carefully, or handed to a freelance systems administrator for a few hours of paid work — this is a small, well-defined project, not an ongoing contract. If you hire someone, ask them specifically to:</p>
+  <ul class="checklist">
+    <li>Keep every admin tool off the public internet, reachable only via the private network</li>
+    <li>Write down every account, login, and setting they create, in a document they hand you — not just in their own head</li>
+    <li>Explain, in plain language, what each piece does — if they can't, that's worth a second opinion</li>
+  </ul>
+</section>
+
+<footer>
+  Written as a general-purpose reference. Your own setup may need small adjustments — talk to whoever's helping you implement it about your specific apps, team size, and existing website or email provider before changing any live settings.
+</footer>
+
+</div>

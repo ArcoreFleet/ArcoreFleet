@@ -1,0 +1,91 @@
+{% extends 'access/base.html' %}
+{% block title %}Users & access - Arcore Portal{% endblock %}
+{% block content %}
+<h1>Users &amp; access</h1>
+<p class="sub">Who can open which app. Admins can open every app and manage this portal. Admin-only apps require the Admin checkbox, regardless of All apps or individual grants.</p>
+
+<div class="panel">
+  <div class="panel-body">
+    <form method="post" class="inline">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_user">
+      <input type="email" name="email" placeholder="name@example.com" required aria-label="Email to add">
+      <button class="btn ghost" type="submit">Add user</button>
+      <span class="note">Pre-add someone to grant access before their first sign-in. They still need to pass the Cloudflare sign-in policy.</span>
+    </form>
+  </div>
+</div>
+
+<form method="post" id="access-form">
+  {% csrf_token %}
+  <div class="panel">
+    <div class="panel-head">
+      <label class="inline"><input type="checkbox" name="new_users_all_apps" {% if settings.new_users_all_apps %}checked{% endif %}> New users get <strong>all apps</strong> by default</label>
+      <button class="btn" type="submit">Save access</button>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th class="c">Admin</th>
+            <th class="c">Active</th>
+            <th class="c divider">All apps</th>
+            {% for app in apps %}
+            <th class="c app"><span class="dot" style="background: {{ app.color }}"></span>{{ app.name }}{% if app.admin_only %} <span class="badge">admin only</span>{% endif %}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          {% with u=row.user %}
+          <tr data-user="{{ u.pk }}">
+            <td>
+              <input type="hidden" name="present_{{ u.pk }}" value="1">
+              <div class="email">{{ u.email|default:u.username }}{% if u.pk == user.pk %} <span class="badge">you</span>{% endif %}</div>
+              <div class="meta">{% if u.last_login %}last sign-in {{ u.last_login|timesince }} ago{% else %}never signed in{% endif %}</div>
+            </td>
+            <td class="c"><input type="checkbox" name="admin_{{ u.pk }}" class="admin" {% if u.is_staff %}checked{% endif %} {% if u.pk == user.pk %}disabled title="You can't remove your own admin rights"{% endif %} aria-label="Admin"></td>
+            <td class="c"><input type="checkbox" name="active_{{ u.pk }}" {% if u.is_active %}checked{% endif %} {% if u.pk == user.pk %}disabled title="You can't deactivate yourself"{% endif %} aria-label="Active"></td>
+            <td class="c divider"><input type="checkbox" name="all_{{ u.pk }}" class="all" {% if row.access.all_apps %}checked{% endif %} aria-label="All apps"></td>
+            {% for app in apps %}
+            <td class="c">{% if app.admin_only %}<span class="note" title="Requires Admin checked">Admin only</span>{% else %}<input type="checkbox" name="app_{{ u.pk }}_{{ app.pk }}" class="app" {% if app.pk in row.app_ids %}checked{% endif %} aria-label="{{ app.name }}">{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endwith %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if not apps %}<p class="note">No apps registered yet - <a href="{% url 'manage_apps' %}">register one</a> to grant per-app access.</p>{% endif %}
+</form>
+
+<script>
+  // "All apps" (or Admin) covers every app: show per-app boxes as checked and locked
+  // while it's on. Their own saved state is kept and comes back when it's turned off.
+  document.querySelectorAll('tr[data-user]').forEach(function (row) {
+    var all = row.querySelector('input.all');
+    var admin = row.querySelector('input.admin');
+    var apps = row.querySelectorAll('input.app');
+    apps.forEach(function (a) { a.dataset.own = a.checked ? '1' : ''; });
+    function sync() {
+      var covered = all.checked || admin.checked;
+      apps.forEach(function (a) {
+        if (covered) { if (!a.disabled) a.dataset.own = a.checked ? '1' : ''; a.checked = true; a.disabled = true; }
+        else { a.disabled = false; a.checked = a.dataset.own === '1'; }
+      });
+    }
+    apps.forEach(function (a) { a.addEventListener('change', function () { a.dataset.own = a.checked ? '1' : ''; }); });
+    all.addEventListener('change', sync);
+    admin.addEventListener('change', sync);
+    sync();
+  });
+  // Disabled inputs aren't submitted: re-enable them on submit so their own state is saved,
+  // and keep admin/active checked for yourself (the server enforces that too).
+  document.getElementById('access-form').addEventListener('submit', function () {
+    document.querySelectorAll('input.app:disabled').forEach(function (a) { a.checked = a.dataset.own === '1'; a.disabled = false; });
+    document.querySelectorAll('input[name^="admin_"]:disabled, input[name^="active_"]:disabled').forEach(function (a) { a.disabled = false; });
+  });
+</script>
+{% endblock %}

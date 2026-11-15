@@ -1,0 +1,10 @@
+# Required for Traefik's Kubernetes provider to recognize
+# ingressClassName: traefik on an app's Ingress - without this object
+# existing, matching Ingresses are silently ignored (no router, no
+# error). See README.md for how this was found.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: traefik
+spec:
+  controller: traefik.io/ingress-controller

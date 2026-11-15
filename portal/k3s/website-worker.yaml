@@ -1,0 +1,76 @@
+# Website worker (portal/website/, see ../WEBSITE.md). The only pod that holds the
+# website GitHub App's private key; the portal web pods never call GitHub for the
+# website manager.
+#
+# Pin the image below and apply AFTER the portal has run migrations. Not applied by CI.
+#
+# Secrets (never committed):
+#   portal-db              from phase4-app-template/provision-app.sh portal
+#   portal-env             DJANGO_SECRET_KEY (shared with the portal)
+#   portal-website-github  app-id, installation-id, private-key.pem (WEBSITE.md)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal-website
+  namespace: apps
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: portal-website
+  template:
+    metadata:
+      labels:
+        app: portal-website
+    spec:
+      automountServiceAccountToken: false # needs no Kubernetes API access
+      securityContext:
+        fsGroup: 10001 # lets the non-root container read the mounted key (mode 0440)
+      containers:
+        - name: website
+          image: REPLACE_WITH_PORTAL_IMAGE_AT_COMMIT_SHA
+          command: [python, manage.py, sync_website, --loop]
+          env:
+            - name: WEBSITE_REPOSITORY
+              value: example-owner/arcore-website
+            - name: WEBSITE_GITHUB_PRIVATE_KEY_FILE
+              value: /etc/website-github/private-key.pem
+            - name: WEBSITE_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef: {name: portal-website-github, key: app-id}
+            - name: WEBSITE_GITHUB_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef: {name: portal-website-github, key: installation-id}
+          envFrom:
+            - secretRef:
+                name: portal-db
+            - secretRef:
+                name: portal-env
+          volumeMounts:
+            - name: github-app
+              mountPath: /etc/website-github
+              readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 192Mi
+      volumes:
+        - name: github-app
+          secret:
+            secretName: portal-website-github
+            defaultMode: 0440
+            items:
+              - key: private-key.pem
+                path: private-key.pem

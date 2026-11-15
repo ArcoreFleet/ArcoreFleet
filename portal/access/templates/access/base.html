@@ -1,0 +1,49 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Arcore Portal{% endblock %}</title>
+  <script src="{% static 'access/fleet-theme.js' %}"></script>
+  <link rel="stylesheet" href="{% static 'access/portal.css' %}">
+  <link rel="stylesheet" href="{% static 'access/fleet.css' %}">
+</head>
+<body>
+<div class="fleet-shell">
+  <a class="fleet-skip" href="#fleet-content">Skip to content</a>
+  <header class="fleet-mobile-header"><strong>ArcoreFleet</strong><button class="fleet-menu-toggle" type="button" aria-expanded="false" aria-controls="fleet-sidebar" data-fleet-menu>Menu</button></header>
+  <aside class="fleet-sidebar" id="fleet-sidebar" aria-label="Application navigation">
+    <div><a class="fleet-brand" href="{% url 'home' %}">ArcoreFleet</a><p class="fleet-subtitle">Applications and operations</p></div>
+    {% if user.is_authenticated %}
+    <nav aria-label="Primary">
+      <a href="{% url 'home' %}" class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}">Apps</a>
+      <a href="{% url 'api_keys' %}" class="{% if request.resolver_match.url_name == 'api_keys' %}active{% endif %}">API keys</a>
+      <a href="{% url 'hub' %}" class="{% if request.resolver_match.url_name == 'hub' %}active{% endif %}">ArcoreHub</a>
+      {% if user.is_staff %}
+      <a href="{% url 'operations' %}" class="{% if request.resolver_match.url_name == 'operations' %}active{% endif %}">Dashboard</a>
+      <a href="{% url 'fleet_settings' %}" class="{% if request.resolver_match.url_name == 'fleet_settings' or request.resolver_match.url_name == 'add_server' or request.resolver_match.url_name == 'edit_server' %}active{% endif %}">Settings</a>
+      <a href="{% url 'website_queue' %}" class="{% if 'website' in request.resolver_match.url_name %}active{% endif %}">Website</a>
+      <a href="{% url 'manage_users' %}" class="{% if request.resolver_match.url_name == 'manage_users' %}active{% endif %}">Users &amp; access</a>
+      <a href="{% url 'manage_apps' %}" class="{% if 'app' in request.resolver_match.url_name %}active{% endif %}">Applications</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+    <footer class="fleet-footer">
+      {% if user.is_authenticated %}<span>{{ user.email|default:user.username }}</span><a href="{% url 'logout' %}">Sign out</a>{% endif %}
+      <button type="button" class="fleet-theme-toggle" data-fleet-theme-toggle>Switch to light mode</button>
+    </footer>
+  </aside>
+  <main id="fleet-content" class="fleet-content" tabindex="-1">
+    {% for message in messages %}<div class="msg {{ message.tags }}">{{ message }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<script>
+  const menu = document.querySelector('[data-fleet-menu]');
+  const sidebar = document.getElementById('fleet-sidebar');
+  function closeMenu() { sidebar.dataset.open = 'false'; menu.setAttribute('aria-expanded', 'false'); }
+  menu.addEventListener('click', () => { const open = menu.getAttribute('aria-expanded') !== 'true'; sidebar.dataset.open = String(open); menu.setAttribute('aria-expanded', String(open)); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && menu.getAttribute('aria-expanded') === 'true') { closeMenu(); menu.focus(); } });
+</script>
+</body>
+</html>

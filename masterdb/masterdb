@@ -1,0 +1,438 @@
+#!/usr/bin/env bash
+# masterdb - manage the multi-app failover Postgres on fleet-worker.
+# Run from anywhere; everything resolves relative to this script.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APPS="$ROOT/apps"
+
+[ -f "$ROOT/.env" ] || { echo "missing $ROOT/.env (copy .env.example)" >&2; exit 1; }
+set -a; . "$ROOT/.env"; set +a
+KEEP="${SNAPSHOT_KEEP:-14}"
+MAX_LAG="${CHECK_MAX_LAG_SECONDS:-300}"
+
+dc() { docker compose -f "$ROOT/compose.yml" --env-file "$ROOT/.env" "$@"; }
+psql_admin() { dc exec -T -e PGOPTIONS="-c client_min_messages=warning" db psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" "$@"; }
+log() { echo "[$(date -u +%FT%TZ)] $*"; }
+die() { echo "error: $*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+usage: masterdb <command> [args]
+
+  up                         start the database container
+  add-app <app>              create role + database + apps/<app>/ folder
+  list                       apps with database size and latest snapshot
+  status                     each app's role (primary / replica / failed over) and replication lag
+  check                      health check for cron: exits 1 (and notifies) on a broken/lagging replica
+
+  snapshot <app>|--all       data snapshot (.dump) + schema snapshot (.sql)
+  schema <app>|--all         schema snapshot only (kept only when it changed)
+  restore <app> <file.dump> [--yes]
+                             restore a data snapshot (takes a safety snapshot first)
+
+  replicate <app> [--yes]    subscribe to the app's primary (apps/<app>/replica.env); EMPTIES local tables first
+  refresh <app>              pick up tables added on the primary
+  resync <app>               rebuild the replica from the primary's current schema + data
+                             (after migrations; check runs it automatically on replication errors)
+  failover <app> [--yes]     detach from the primary and make masterdb the app's writable database
+  failback <app> [--yes]     copy masterdb's data back to the primary and resume replicating from it
+
+  sync <app>|--all [--force] copy masterdb -> Oracle ADB (needs apps/<app>/sync.env)
+  psql [app]                 interactive psql as the admin user
+EOF
+}
+
+valid_app() {
+  [[ "${1:-}" =~ ^[a-z][a-z0-9_]{1,62}$ ]] || die "app name must match ^[a-z][a-z0-9_]{1,62}\$"
+}
+
+app_exists() {
+  valid_app "$1"
+  [ -d "$APPS/$1" ] || die "unknown app '$1' (no $APPS/$1)"
+}
+
+all_apps() {
+  find "$APPS" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+}
+
+confirm() {
+  [ "${YES:-}" = "--yes" ] && return 0
+  read -r -p "$1 [y/N] " ans
+  [ "$ans" = "y" ] || die "aborted"
+}
+
+notify() {
+  log "$*"
+  [ -n "${NOTIFY_URL:-}" ] && curl -fsS -m 10 -d "masterdb@$(hostname): $*" "$NOTIFY_URL" >/dev/null || true
+}
+
+sub_name() { echo "${1}_sub"; }
+
+has_subscription() {
+  [ -n "$(psql_admin -d "$1" -tAc "SELECT 1 FROM pg_subscription WHERE subname = '$(sub_name "$1")'")" ]
+}
+
+load_replica_env() {
+  [ -f "$APPS/$1/replica.env" ] || die "$1: no apps/$1/replica.env (masterdb is not a replica for this app)"
+  set -a; . "$APPS/$1/replica.env"; set +a
+}
+
+# Runs a client tool inside the db container against the app's primary.
+primary() {
+  local user="$1" pass="$2"; shift 2
+  dc exec -T -e PGPASSWORD="$pass" -e PGHOST="$PRIMARY_HOST" -e PGPORT="$PRIMARY_PORT" \
+    -e PGUSER="$user" -e PGDATABASE="$PRIMARY_DB" db "$@"
+}
+
+# Move identity/serial sequences past the current max ids (logical replication
+# doesn't carry sequence state, so a replica's sequences lag its data).
+reset_sequences() {
+  psql_admin -d "$1" <<'SQL'
+DO $$
+DECLARE r record; m bigint;
+BEGIN
+  FOR r IN
+    SELECT c.relname AS tbl, a.attname AS col,
+           pg_get_serial_sequence(quote_ident(c.relname), a.attname) AS seq
+      FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+       AND pg_get_serial_sequence(quote_ident(c.relname), a.attname) IS NOT NULL
+  LOOP
+    EXECUTE format('SELECT max(%I) FROM %I', r.col, r.tbl) INTO m;
+    PERFORM setval(r.seq, coalesce(m, 1), m IS NOT NULL);
+  END LOOP;
+END $$;
+SQL
+}
+
+# SQL that empties every public table except the one named in $1 (if any).
+truncate_sql() {
+  cat <<SQL
+DO \$\$ DECLARE t text; BEGIN
+  SELECT string_agg(format('%I', tablename), ', ') INTO t FROM pg_tables
+   WHERE schemaname = 'public' AND tablename <> '${1:-}';
+  IF t IS NOT NULL THEN EXECUTE 'TRUNCATE ' || t || ' RESTART IDENTITY CASCADE'; END IF;
+END \$\$;
+SQL
+}
+
+cmd_up() {
+  dc up -d --wait
+}
+
+cmd_add_app() {
+  local app="${1:-}"; valid_app "$app"
+  [ -e "$APPS/$app" ] && die "$APPS/$app already exists"
+  local exists
+  exists="$(psql_admin -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$app'")"
+  [ -z "$exists" ] || die "role '$app' already exists in masterdb"
+
+  local pw
+  pw="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
+  psql_admin -d postgres -v app="$app" -v pw="$pw" <<'SQL'
+CREATE ROLE :"app" LOGIN PASSWORD :'pw';
+CREATE DATABASE :"app" OWNER :"app";
+REVOKE ALL ON DATABASE :"app" FROM PUBLIC;
+SQL
+
+  mkdir -p "$APPS/$app/schema" "$APPS/$app/snapshots"
+  ( umask 077
+    cat > "$APPS/$app/.env" <<EOF
+# Connection for $app on masterdb (failover). Names match Django's POSTGRES_* settings.
+POSTGRES_DB=$app
+POSTGRES_USER=$app
+POSTGRES_PASSWORD=$pw
+POSTGRES_HOST=${MASTERDB_BIND:-127.0.0.1}
+POSTGRES_PORT=${MASTERDB_PORT:-5432}
+EOF
+  )
+  cat > "$APPS/$app/README.md" <<EOF
+# $app
+
+Database \`$app\` on masterdb, owned by role \`$app\`.
+Credentials: \`.env\` in this folder (gitignored).
+
+- \`schema/\`      schema history - a new file only when the schema changed; \`latest.sql\` is current
+- \`snapshots/\`   data snapshots (\`pg_dump -Fc\`), last $KEEP kept, gitignored
+- \`replica.env\`  optional: this app's primary elsewhere, for \`masterdb replicate $app\` (gitignored)
+- \`sync.env\`     optional: Oracle ADB target for \`masterdb sync $app\` (gitignored)
+EOF
+  log "created app '$app' -> $APPS/$app (credentials in $APPS/$app/.env)"
+}
+
+cmd_list() {
+  printf '%-24s %10s  %s\n' APP SIZE LATEST_SNAPSHOT
+  local app size latest
+  for app in $(all_apps); do
+    size="$(psql_admin -d postgres -tAc "SELECT pg_size_pretty(pg_database_size('$app'))" 2>/dev/null || echo '?')"
+    latest="$(ls -1t "$APPS/$app/snapshots/"*.dump 2>/dev/null | head -1 | xargs -r basename || true)"
+    printf '%-24s %10s  %s\n' "$app" "${size:-missing}" "${latest:--}"
+  done
+}
+
+# Prints "<role>|<enabled>|<lag seconds>" for an app.
+app_state() {
+  local app="$1"
+  if [ -f "$APPS/$app/FAILED_OVER" ]; then
+    echo "failed-over||"
+  elif [ -f "$APPS/$app/replica.env" ]; then
+    local row
+    row="$(psql_admin -d "$app" -tAc "
+      SELECT s.subenabled,
+             COALESCE(EXTRACT(EPOCH FROM now() - st.last_msg_receipt_time)::int, -1)
+        FROM pg_subscription s
+        LEFT JOIN pg_stat_subscription st ON st.subid = s.oid AND st.relid IS NULL
+       WHERE s.subname = '$(sub_name "$app")'")"
+    if [ -z "$row" ]; then echo "replica(not-subscribed)||"; else echo "replica|$row"; fi
+  else
+    echo "primary||"
+  fi
+}
+
+cmd_status() {
+  printf '%-24s %-24s %-8s %s\n' APP ROLE ENABLED LAST_MSG_FROM_PRIMARY
+  local app st role enabled lag
+  for app in $(all_apps); do
+    st="$(app_state "$app")"; IFS='|' read -r role enabled lag <<< "$st"
+    [ -n "$lag" ] && { [ "$lag" = "-1" ] && lag="never (worker down)" || lag="${lag}s ago"; }
+    printf '%-24s %-24s %-8s %s\n' "$app" "$role" "${enabled:--}" "${lag:--}"
+  done
+}
+
+cmd_check() {
+  local app st role enabled lag errors bad=0
+  for app in $(all_apps); do
+    st="$(app_state "$app")"; IFS='|' read -r role enabled lag <<< "$st"
+    case "$role" in
+      replica)
+        errors="$(psql_admin -d "$app" -tAc "SELECT apply_error_count + sync_error_count
+                    FROM pg_stat_subscription_stats WHERE subname = '$(sub_name "$app")'")"
+        if [ "${errors:-0}" -gt 0 ] && [ "${AUTO_RESYNC:-true}" = "true" ]; then
+          # Almost always a migration on the primary that masterdb doesn't have yet.
+          notify "$app: replication hit $errors error(s) (schema change on primary?) - resyncing"
+          if ( cmd_resync "$app" ); then notify "$app: resync OK"; else notify "$app: resync FAILED"; bad=1; fi
+        elif [ "$enabled" != "t" ]; then notify "$app: subscription is DISABLED"; bad=1
+        elif [ "$lag" -lt 0 ] || [ "$lag" -gt "$MAX_LAG" ]; then
+          notify "$app: no message from primary for ${lag}s (> ${MAX_LAG}s) - primary down or replication broken"; bad=1
+        fi ;;
+      "replica(not-subscribed)") notify "$app: has replica.env but no subscription (run: masterdb replicate $app)"; bad=1 ;;
+      failed-over) log "$app: running FAILED OVER on masterdb since $(head -1 "$APPS/$app/FAILED_OVER")" ;;
+    esac
+  done
+  [ "$bad" = 0 ] && log "check ok"
+  return "$bad"
+}
+
+# Schema-only dump; kept as a new timestamped file only if it differs from latest.sql.
+schema_one() {
+  local app="$1" ts="$2" dir="$APPS/$1/schema"
+  mkdir -p "$dir"
+  # --no-subscriptions: a replica's subscription (with its connection string) isn't schema.
+  dc exec -T db pg_dump -U "$POSTGRES_USER" -d "$app" --schema-only --no-owner --no-privileges \
+      --no-subscriptions --no-publications \
+    | sed '/^\\restrict /d; /^\\unrestrict /d' > "$dir/.tmp.sql"
+  if [ -f "$dir/latest.sql" ] && cmp -s "$dir/.tmp.sql" "$dir/latest.sql"; then
+    rm "$dir/.tmp.sql"
+    log "$app: schema unchanged"
+  else
+    cp "$dir/.tmp.sql" "$dir/${app}_${ts}.sql"
+    mv "$dir/.tmp.sql" "$dir/latest.sql"
+    log "$app: schema changed -> schema/${app}_${ts}.sql"
+  fi
+}
+
+snapshot_one() {
+  local app="$1" ts="$2" dir="$APPS/$1/snapshots"
+  mkdir -p "$dir"
+  dc exec -T db pg_dump -U "$POSTGRES_USER" -d "$app" -Fc --no-subscriptions > "$dir/.tmp.dump"
+  mv "$dir/.tmp.dump" "$dir/${app}_${ts}.dump"
+  log "$app: snapshot -> snapshots/${app}_${ts}.dump ($(du -h "$dir/${app}_${ts}.dump" | cut -f1))"
+  schema_one "$app" "$ts"
+  ls -1t "$dir/"*.dump | tail -n +"$((KEEP + 1))" | xargs -r rm --
+}
+
+for_apps() {
+  local fn="$1" target="${2:-}" ts app
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  [ -n "$target" ] || die "need <app> or --all"
+  if [ "$target" = "--all" ]; then
+    for app in $(all_apps); do "$fn" "$app" "$ts"; done
+  else
+    app_exists "$target"; "$fn" "$target" "$ts"
+  fi
+}
+
+cmd_restore() {
+  local app="${1:-}" file="${2:-}"; YES="${3:-}"
+  app_exists "$app"
+  [ -f "$file" ] || die "no such file: $file"
+  has_subscription "$app" && die "$app is a live replica - restore on its primary, or failover first"
+  confirm "Replace ALL data in '$app' with $(basename "$file")?"
+  log "$app: safety snapshot before restore"
+  snapshot_one "$app" "$(date -u +%Y%m%dT%H%M%SZ)_prerestore"
+  dc exec -T db pg_restore -U "$POSTGRES_USER" -d "$app" --clean --if-exists \
+    --no-owner --role="$app" --single-transaction < "$file"
+  log "$app: restored from $(basename "$file")"
+}
+
+cmd_replicate() {
+  local app="${1:-}"; YES="${2:-}"
+  app_exists "$app"; load_replica_env "$app"
+  has_subscription "$app" && die "$app is already subscribed (see: masterdb status)"
+  [ -f "$APPS/$app/FAILED_OVER" ] && die "$app is failed over - use: masterdb failback $app"
+  local n
+  n="$(psql_admin -d "$app" -tAc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
+  [ "$n" -gt 0 ] || die "$app has no tables on masterdb - run the app's migrations against masterdb first"
+  confirm "EMPTY all $n tables in masterdb '$app' and copy everything from $PRIMARY_NAME?"
+  snapshot_one "$app" "$(date -u +%Y%m%dT%H%M%SZ)_prereplicate"
+  psql_admin -d "$app" -c "$(truncate_sql)"
+  psql_admin -d "$app" -c "CREATE SUBSCRIPTION $(sub_name "$app")
+    CONNECTION 'host=$PRIMARY_HOST port=$PRIMARY_PORT dbname=$PRIMARY_DB user=$REPL_USER password=$REPL_PASSWORD'
+    PUBLICATION masterdb_pub WITH (copy_data = true)"
+  log "$app: subscribed to $PRIMARY_NAME - initial copy running (watch: masterdb status)"
+}
+
+cmd_refresh() {
+  local app="${1:-}"; app_exists "$app"
+  has_subscription "$app" || die "$app has no subscription"
+  psql_admin -d "$app" -c "ALTER SUBSCRIPTION $(sub_name "$app") REFRESH PUBLICATION"
+  log "$app: subscription refreshed"
+}
+
+# Rebuilds a replica from scratch: the primary's schema (pg_dump --schema-only,
+# so the app's own migrations never need to run against masterdb), then a full
+# data copy. This is how schema changes reach masterdb - logical replication
+# carries rows, not DDL.
+cmd_resync() {
+  local app="${1:-}" schema
+  app_exists "$app"; load_replica_env "$app"
+  [ -f "$APPS/$app/FAILED_OVER" ] && die "$app is failed over - use: masterdb failback $app"
+  primary "$REPL_USER" "$REPL_PASSWORD" pg_isready -q || die "$PRIMARY_NAME is not reachable"
+  schema="$(primary "$REPL_USER" "$REPL_PASSWORD" pg_dump --schema-only --no-owner --no-privileges \
+              --no-publications --no-subscriptions --schema=public \
+            | sed '/^\\restrict /d; /^\\unrestrict /d; /^CREATE SCHEMA public;$/d; /^COMMENT ON SCHEMA public /d')"
+  [ -n "$schema" ] || die "empty schema dump from $PRIMARY_NAME"
+
+  # Every step checks its own result: check runs this inside an `if`, where
+  # bash ignores set -e, so a failure would otherwise be reported as success.
+  snapshot_one "$app" "$(date -u +%Y%m%dT%H%M%SZ)_preresync" || die "$app: safety snapshot failed"
+  # Normal DROP SUBSCRIPTION also drops the slot on the (reachable) primary.
+  if has_subscription "$app"; then
+    psql_admin -d "$app" -c "DROP SUBSCRIPTION $(sub_name "$app")" || die "$app: could not drop the subscription"
+  fi
+  { echo "BEGIN;"
+    echo "DROP SCHEMA public CASCADE;"
+    echo "CREATE SCHEMA public AUTHORIZATION \"$app\";"
+    echo "SET ROLE \"$app\";"
+    echo "$schema"
+    echo "COMMIT;"
+  } | psql_admin -d "$app" >/dev/null || die "$app: rebuilding the schema failed"
+  psql_admin -d "$app" -c "CREATE SUBSCRIPTION $(sub_name "$app")
+    CONNECTION 'host=$PRIMARY_HOST port=$PRIMARY_PORT dbname=$PRIMARY_DB user=$REPL_USER password=$REPL_PASSWORD'
+    PUBLICATION masterdb_pub WITH (copy_data = true)" || die "$app: could not subscribe to $PRIMARY_NAME"
+  has_subscription "$app" || die "$app: no subscription after resync"
+  schema_one "$app" "$(date -u +%Y%m%dT%H%M%SZ)"
+  log "$app: resynced from $PRIMARY_NAME (schema + full copy running)"
+}
+
+cmd_failover() {
+  local app="${1:-}"; YES="${2:-}"
+  app_exists "$app"; load_replica_env "$app"
+  has_subscription "$app" || die "$app has no subscription to fail over from"
+  confirm "Detach '$app' from $PRIMARY_NAME and make masterdb its writable database?"
+  # Detach without contacting the primary (it may be down): slot_name=NONE keeps
+  # DROP SUBSCRIPTION from trying to drop the remote slot. failback cleans it up.
+  psql_admin -d "$app" <<SQL
+ALTER SUBSCRIPTION $(sub_name "$app") DISABLE;
+ALTER SUBSCRIPTION $(sub_name "$app") SET (slot_name = NONE);
+DROP SUBSCRIPTION $(sub_name "$app");
+SQL
+  reset_sequences "$app"
+  date -u +%FT%TZ > "$APPS/$app/FAILED_OVER"
+  echo "stale slot '$(sub_name "$app")' left on $PRIMARY_NAME; failback drops it" >> "$APPS/$app/FAILED_OVER"
+  notify "$app: FAILED OVER to masterdb"
+  cat <<EOF
+
+Next: point $app at masterdb (values in $APPS/$app/.env), e.g. for Django:
+  POSTGRES_HOST=${MASTERDB_BIND:-127.0.0.1} POSTGRES_PORT=${MASTERDB_PORT:-5432} plus that file's user/password.
+Make sure nothing still writes to $PRIMARY_NAME - its data is now stale.
+EOF
+}
+
+cmd_failback() {
+  local app="${1:-}" ts; YES="${2:-}"
+  app_exists "$app"; load_replica_env "$app"
+  [ -f "$APPS/$app/FAILED_OVER" ] || die "$app is not failed over"
+  confirm "Has '$app' been STOPPED (no writes to masterdb)? This replaces all data on $PRIMARY_NAME with masterdb's."
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+
+  primary "$APP_USER" "$APP_PASSWORD" pg_isready -q || die "$PRIMARY_NAME is not reachable"
+  log "$app: safety dump of $PRIMARY_NAME's (stale) data"
+  primary "$APP_USER" "$APP_PASSWORD" pg_dump -Fc > "$APPS/$app/snapshots/${app}_${ts}_${PRIMARY_NAME}_prefailback.dump"
+
+  log "$app: dropping stale replication slot on $PRIMARY_NAME"
+  primary "$REPL_USER" "$REPL_PASSWORD" psql -X -q -tAc \
+    "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = '$(sub_name "$app")'" >/dev/null
+
+  log "$app: copying masterdb -> $PRIMARY_NAME"
+  # Django FKs are DEFERRABLE INITIALLY DEFERRED, so one transaction loads in any order;
+  # the data-only dump also carries sequence values.
+  { truncate_sql django_migrations
+    dc exec -T db pg_dump -U "$POSTGRES_USER" -d "$app" --data-only --no-owner --no-privileges \
+      --no-subscriptions --exclude-table=django_migrations
+  } | primary "$APP_USER" "$APP_PASSWORD" psql -X -q -v ON_ERROR_STOP=1 --single-transaction >/dev/null
+
+  log "$app: resuming replication from $PRIMARY_NAME (no initial copy - data now identical)"
+  psql_admin -d "$app" -c "CREATE SUBSCRIPTION $(sub_name "$app")
+    CONNECTION 'host=$PRIMARY_HOST port=$PRIMARY_PORT dbname=$PRIMARY_DB user=$REPL_USER password=$REPL_PASSWORD'
+    PUBLICATION masterdb_pub WITH (copy_data = false)"
+  rm "$APPS/$app/FAILED_OVER"
+  notify "$app: FAILED BACK to $PRIMARY_NAME"
+  echo "Next: point $app back at $PRIMARY_NAME and start it."
+}
+
+sync_one() {
+  local app="$1" force="${SYNC_FORCE:-}"
+  [ -f "$APPS/$app/sync.env" ] || { log "$app: no sync.env, skipping"; return 0; }
+  # One app failing (guard, drift, Oracle down) must not stop the others.
+  dc --profile sync run --rm -T sync "$app" ${force:+--force} || { log "$app: sync FAILED"; SYNC_FAILED=1; }
+}
+
+cmd_sync() {
+  local target="${1:-}"
+  [ "${2:-}" = "--force" ] && export SYNC_FORCE=1
+  SYNC_FAILED=0
+  dc --profile sync build -q sync >/dev/null
+  for_apps sync_one "$target"
+  return "$SYNC_FAILED"
+}
+
+cmd_psql() {
+  dc exec db psql -U "$POSTGRES_USER" -d "${1:-postgres}"
+}
+
+# Braces + exit: bash parses this whole block before running it and never reads
+# past it, so editing or `git pull`ing this file during a cron run is safe.
+{
+case "${1:-}" in
+  up)        cmd_up ;;
+  add-app)   cmd_add_app "${2:-}" ;;
+  list)      cmd_list ;;
+  status)    cmd_status ;;
+  check)     cmd_check ;;
+  snapshot)  for_apps snapshot_one "${2:-}" ;;
+  schema)    for_apps schema_one "${2:-}" ;;
+  restore)   cmd_restore "${2:-}" "${3:-}" "${4:-}" ;;
+  replicate) cmd_replicate "${2:-}" "${3:-}" ;;
+  refresh)   cmd_refresh "${2:-}" ;;
+  resync)    cmd_resync "${2:-}" ;;
+  failover)  cmd_failover "${2:-}" "${3:-}" ;;
+  failback)  cmd_failback "${2:-}" "${3:-}" ;;
+  sync)      cmd_sync "${2:-}" "${3:-}" ;;
+  psql)      cmd_psql "${2:-}" ;;
+  *)         usage; exit 1 ;;
+esac
+exit
+}

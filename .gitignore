@@ -1,0 +1,160 @@
+# =========================================================================
+# ArcoreFleet .gitignore
+# =========================================================================
+
+# --- RepoLibrary: cloned repos, each its own independent git repository ---
+# Never tracked/submoduled here; RepoLibrary itself is just a local mirror.
+/RepoLibrary/
+
+# --- Secrets & credentials ---
+/secrets/
+*.env
+.env
+.env.*
+!.env.example
+!.env.*.example
+*secret*
+*secrets*
+*credential*
+!*secret*.example.*
+!*secret*.example
+# Scripts that operate on secrets but contain none themselves.
+!copy-shared-secrets.sh
+*credentials*
+*.pem
+*.key
+*.crt
+# k8s-ca.crt is the cluster's public CA cert (verification material, not
+# secret) - safe and necessary to commit for the Traefik K8s provider.
+!phase1-network-ingress/traefik/k8s-ca.crt
+*.p12
+*.pfx
+*_rsa
+*_rsa.pub
+*_ed25519
+*_ed25519.pub
+id_rsa*
+id_ed25519*
+known_hosts
+.htpasswd
+kubeconfig
+kubeconfig.yaml
+*.kubeconfig
+*-kubeconfig
+.kube/
+k3s.yaml
+*.tfvars
+!*.tfvars.example
+*.tfstate
+*.tfstate.*
+.vault-token
+.vault-pass
+*token*
+!*.tokenless
+
+# --- Tailscale ---
+tailscale.state
+*.tailscale-state
+
+# --- Terraform ---
+.terraform/
+# .terraform.lock.hcl is intentionally tracked (pins exact provider
+# versions for reproducibility) - not ignored here.
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# --- Ansible ---
+*.retry
+.vault_pass*
+
+# --- Helm / Kubernetes ---
+charts/*/charts/
+charts/*/Chart.lock
+*.orig
+.kubeconfig
+# Rendered manifests from helm template / kustomize build output
+rendered/
+/manifests/generated/
+
+# --- Docker ---
+.dockerignore.local
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# --- Cloudflare / cloudflared ---
+cert.pem
+cloudflared-cert.pem
+*.cloudflared.json
+tunnel-credentials.json
+
+# --- Portainer ---
+portainer_data/
+
+# --- Databases / data volumes ---
+*.sqlite
+*.sqlite3
+*.db
+pgdata/
+pg_data/
+redis_data/
+data/
+volumes/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+!.vscode/extensions.json
+
+# --- Node / JS (standardized app template tooling) ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.next/
+.nuxt/
+coverage/
+
+# --- Python (if used for scripting/CI helpers) ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# --- Go (ARM/amd64 build artifacts) ---
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+vendor/
+
+# --- Backups / scratch ---
+*.bak
+*.tmp
+*.old
+backup/
+backups/
+
+# --- CI/CD local overrides ---
+.github/workflows/*.local.yml
+
+# Django collectstatic output (built in the image)
+portal/staticfiles/

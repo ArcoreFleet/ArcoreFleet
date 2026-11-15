@@ -1,0 +1,45 @@
+# Standardized template for an app running as plain Docker (not K3s) on
+# the ingress node. Copy to a new directory, rename to docker-compose.yml,
+# fill in every <PLACEHOLDER>.
+#
+# K3s + Ingress (see ../k3s/) is the preferred path - apps there get
+# routed automatically. Use this instead only for something that
+# genuinely doesn't belong in the cluster. Traefik's Docker-label
+# provider is currently disabled here (a Traefik<->Docker API version
+# incompatibility - see phase1-network-ingress/traefik/README or commit
+# history), so routing for a Compose app is added manually as a Traefik
+# dynamic file, same pattern as
+# phase1-network-ingress/traefik/dynamic/sample-app.yml.example.
+
+services:
+  <APP_NAME>:
+    image: <IMAGE>
+    container_name: <APP_NAME>
+    restart: unless-stopped
+    ports:
+      - "<HOST_PORT>:<CONTAINER_PORT>" # pick a free host port; this is what the Traefik dynamic file below points at
+    environment:
+      # Shared Postgres (Phase 3) - compose apps aren't on the K3s
+      # cluster network, so they reach it via the node-tailnet NodePort,
+      # not the in-cluster DNS name.
+      POSTGRES_HOST: "<ARCORE01_TAILSCALE_IP>"
+      POSTGRES_PORT: "30432"
+      POSTGRES_USER: "<FROM phase3-data-services/postgres/secret.yaml>"
+      POSTGRES_PASSWORD: "<FROM phase3-data-services/postgres/secret.yaml>"
+      POSTGRES_DB: "<FROM phase3-data-services/postgres/secret.yaml>"
+      # Redis has no NodePort currently (in-cluster only) - add one in
+      # phase3-data-services/redis/service.yaml first if a Compose app
+      # needs it.
+    # Strict limits - required for every app so one misbehaving
+    # container can't starve the node. Tune to the app's actual
+    # footprint; these are a conservative starting point.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    mem_limit: 512m # mirrors deploy.resources.limits for plain `docker compose up` (non-swarm)
+    cpus: 0.5

@@ -1,0 +1,23 @@
+<!doctype html>
+{# Standalone: shown on the *app's* hostname when /auth/check refuses, so assets come from the portal's absolute URL. #}
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>No access - Arcore Portal</title>
+  <script src="{{ portal_url }}/static/access/fleet-theme.js"></script>
+  <link rel="stylesheet" href="{{ portal_url }}/static/access/fleet.css">
+  <link rel="stylesheet" href="{{ portal_url }}/static/access/portal.css">
+</head>
+<body>
+  <main>
+    <div class="denied">
+      <div class="icon">🔒</div>
+      <h1>No access</h1>
+      <p class="sub">{{ reason }}</p>
+      <p>Ask an administrator to grant you access, or see the apps you can open.</p>
+      <p><a class="btn" href="{{ portal_url }}/">Go to the portal</a></p>
+    </div>
+  </main>
+</body>
+</html>

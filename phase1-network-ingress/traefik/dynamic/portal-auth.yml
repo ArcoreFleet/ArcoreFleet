@@ -1,0 +1,15 @@
+# Per-user app access, decided by the portal (portal/README.md). An Ingress
+# opts in with the annotation
+#   traefik.ingress.kubernetes.io/router.middlewares: portal-auth@file
+# Traefik then asks the portal before every request; 200 lets it through,
+# anything else (403 "no access" page) is returned to the browser instead.
+#
+# Address: the portal's NodePort on this node (Traefik runs with host
+# networking on fleet-control). The portal reads the Cf-Access-Jwt-Assertion header
+# Cloudflare Access adds, and X-Forwarded-Host for which app is being opened.
+http:
+  middlewares:
+    portal-auth:
+      forwardAuth:
+        address: "http://127.0.0.1:30480/auth/check"
+        trustForwardHeader: true

@@ -1,0 +1,84 @@
+# Optional: pin the image below and apply AFTER the portal has run migrations.
+# Uses existing portal-db and portal-env Secrets. Not applied by CI.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portal-operations
+  namespace: apps
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: portal-operations
+  namespace: apps
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: portal-operations
+  namespace: apps
+subjects:
+  - kind: ServiceAccount
+    name: portal-operations
+    namespace: apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: portal-operations
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal-operations
+  namespace: apps
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: portal-operations
+  template:
+    metadata:
+      labels:
+        app: portal-operations
+    spec:
+      serviceAccountName: portal-operations
+      containers:
+        - name: collect
+          image: REPLACE_WITH_PORTAL_IMAGE_AT_COMMIT_SHA
+          command: [python, manage.py, sync_operations, --loop, --server-config, /etc/fleet-servers/servers.json]
+          volumeMounts:
+            - name: servers
+              mountPath: /etc/fleet-servers
+              readOnly: true
+          env:
+            - name: FLEET_KUBERNETES_ENABLED
+              value: 'true'
+          envFrom:
+            - secretRef:
+                name: portal-db
+            - secretRef:
+                name: portal-env
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+      volumes:
+        - name: servers
+          configMap:
+            name: fleet-operations-servers

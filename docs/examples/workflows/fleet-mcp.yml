@@ -1,0 +1,70 @@
+# Tests, builds and deploys the Fleet MCP gateway (fleet-mcp/) with the Phase 5 pipeline.
+# Repo secrets: TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET, KUBE_CONFIG_CI.
+
+name: Fleet MCP - test, build and deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["fleet-mcp/**", "docs/examples/workflows/fleet-mcp.yml"]
+  pull_request:
+    paths: ["fleet-mcp/**", "docs/examples/workflows/fleet-mcp.yml"]
+
+concurrency:
+  group: fleet-mcp-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: 192.0.2.10:30500/fleet-mcp
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fleet-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  build-and-deploy:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join tailnet
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+          tags: tag:ci
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+          buildkitd-config: fleet-mcp/phase5-buildkitd.toml
+
+      - name: Build and push
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t $IMAGE:${{ github.sha }} -t $IMAGE:latest --push fleet-mcp
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Deploy to K3s
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_CI }}" | base64 -d > ~/.kube/config
+          kubectl -n apps set image deployment/fleet-mcp fleet-mcp=$IMAGE:${{ github.sha }}
+          kubectl -n apps rollout status deployment/fleet-mcp --timeout=180s

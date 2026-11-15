@@ -1,0 +1,25 @@
+{
+  "team_domain": "https://example.cloudflareaccess.com",
+  "wildcard_domain": "*.example.com",
+  "apps": [
+    {
+      "id": "sample-app",
+      "name": "Sample App",
+      "hostname": "sample-app.example.com",
+      "mode": "cloudflare_jwt",
+      "admin_only": false
+    },
+    {
+      "id": "portainer",
+      "name": "Portainer",
+      "hostname": "portainer.example.com",
+      "mode": "oidc",
+      "admin_only": true,
+      "redirect_uris": [
+        "https://portainer.example.com/"
+      ],
+      "adapter": "portainer",
+      "bootstrap_secret": "portainer-sso-bootstrap"
+    }
+  ]
+}

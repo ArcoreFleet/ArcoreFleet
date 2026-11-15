@@ -1,0 +1,13 @@
+{% extends 'access/base.html' %}
+{% block title %}Server configuration - Arcore Portal{% endblock %}
+{% block content %}
+<h1>{% if server %}Edit {{ server.name }}{% else %}Add monitored server{% endif %}</h1>
+<p class="sub">Use the host's private or Tailscale node_exporter endpoint. The collector must be able to reach it. <a href="{% url 'fleet_settings' %}">Back to Fleet settings</a>.</p>
+<div class="panel panel-body">
+  <form method="post">
+    {% csrf_token %}
+    {% include 'access/app_fields.html' %}
+    <div class="actions"><button class="btn" type="submit">Save</button><a href="{% url 'operations' %}">Cancel</a></div>
+  </form>
+</div>
+{% endblock %}

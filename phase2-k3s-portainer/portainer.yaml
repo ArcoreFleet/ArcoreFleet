@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portainer
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portainer-sa
+  namespace: portainer
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: portainer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: portainer-sa
+    namespace: portainer
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: portainer-data
+  namespace: portainer
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portainer
+  namespace: portainer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # single ReadWriteOnce PVC; avoid two pods fighting over it
+  selector:
+    matchLabels:
+      app: portainer
+  template:
+    metadata:
+      labels:
+        app: portainer
+    spec:
+      serviceAccountName: portainer-sa
+      # Pin to fleet-control: it's the always-available node (Oracle free tier),
+      # so the PVC (local-path, node-bound) and the UI stay reachable even
+      # if fleet-worker (homelab failover) is down.
+      nodeSelector:
+        kubernetes.io/hostname: fleet-control
+      containers:
+        - name: portainer
+          image: portainer/portainer-ce:2.45.2 # includes the Cloudflare OAuth Content-Type parsing fix
+          args: ["--tunnel-port=8000"]
+          ports:
+            - containerPort: 9000  # HTTP UI
+            - containerPort: 9443  # HTTPS UI
+            - containerPort: 8000  # Edge agent tunnel
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: portainer-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portainer
+  namespace: portainer
+spec:
+  type: NodePort
+  selector:
+    app: portainer
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+      nodePort: 30900
+    - name: https
+      port: 9443
+      targetPort: 9443
+      nodePort: 30943
+    - name: edge
+      port: 8000
+      targetPort: 8000
+      nodePort: 30800

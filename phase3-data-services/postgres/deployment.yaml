@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: data
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # single ReadWriteOnce PVC; avoid two pods fighting over it
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      # Pinned to fleet-control (always-available node) - same rationale as
+      # Portainer: the PVC is node-bound (local-path), so the pod must
+      # always land on the node that actually has the data.
+      nodeSelector:
+        kubernetes.io/hostname: fleet-control
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          # Logical replication to masterdb on fleet-worker (amd64). Physical
+          # streaming replication isn't supported across CPU architectures,
+          # logical is. max_slot_wal_keep_size caps how much WAL a stalled
+          # subscriber can pin, so an offline fleet-worker can't fill the PVC.
+          args:
+            - "-c"
+            - "wal_level=logical"
+            - "-c"
+            - "max_replication_slots=10"
+            - "-c"
+            - "max_wal_senders=10"
+            - "-c"
+            - "max_slot_wal_keep_size=2GB"
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata # avoids writing into the volume's root (lost+found, etc.)
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data

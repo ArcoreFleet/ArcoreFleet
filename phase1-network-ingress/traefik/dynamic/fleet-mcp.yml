@@ -1,0 +1,14 @@
+# The Fleet MCP gateway (fleet-mcp/) is reachable only over the tailnet:
+#   http://fleet-control.example-tailnet.ts.net:8880/mcp
+# Its Ingress (fleet-mcp/k3s/fleet-mcp.yaml) matches only that tailnet name and
+# uses this middleware. Unlike dashboard.yml's tailnet-only, 127.0.0.1 is NOT
+# allowed: everything arriving through the Cloudflare Tunnel comes from
+# localhost, so this refuses it even if a Host header were forged. Traefik
+# runs with host networking and the default ipStrategy uses the connection's
+# remote address (never X-Forwarded-For), so tailnet clients are seen as 100.x.
+http:
+  middlewares:
+    fleet-mcp-tailnet:
+      ipAllowList:
+        sourceRange:
+          - "100.64.0.0/10"

@@ -1,0 +1,54 @@
+# Grants the standalone Traefik (running as a plain Docker container
+# outside the cluster) read-only access to watch Ingress objects across
+# K3s, so apps deployed into K3s get routed automatically just by
+# creating an Ingress - no per-app Traefik file/label needed.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik-ingress-reader
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: traefik-ingress-reader
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "secrets", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses/status"]
+    verbs: ["update"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: traefik-ingress-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: traefik-ingress-reader
+subjects:
+  - kind: ServiceAccount
+    name: traefik-ingress-reader
+    namespace: kube-system
+
+---
+# Kubernetes 1.24+ no longer auto-creates a token Secret for a
+# ServiceAccount - this requests a long-lived one explicitly.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: traefik-ingress-reader-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: traefik-ingress-reader
+type: kubernetes.io/service-account-token

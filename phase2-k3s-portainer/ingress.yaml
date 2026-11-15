@@ -1,0 +1,22 @@
+# Existing wildcard Cloudflare Access + tunnel forwards this to Fleet Traefik.
+# Register portainer.example.com in the portal with admin_only=True first.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portainer
+  namespace: portainer
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: portal-auth@file
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: portainer.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: portainer
+                port:
+                  number: 9000

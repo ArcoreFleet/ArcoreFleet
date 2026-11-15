@@ -1,0 +1,21 @@
+# Example dynamic router for a single app, routed by subdomain under
+# *.example.com. Copy this file to <app-name>.yml (drop .example) once
+# the app container is reachable from the Traefik host over the tailnet.
+#
+# Once K3s is live (Phase 2), per-app routing moves to Kubernetes
+# IngressRoute/Ingress objects instead of these static files — kept here
+# only for pre-K3s / standalone Docker services.
+
+http:
+  routers:
+    sample-app:
+      rule: "Host(`sample-app.example.com`)"
+      entryPoints:
+        - web
+      service: sample-app
+
+  services:
+    sample-app:
+      loadBalancer:
+        servers:
+          - url: "http://100.64.0.0:3000" # replace with the app's tailnet IP:port

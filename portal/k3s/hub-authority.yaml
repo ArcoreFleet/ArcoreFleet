@@ -1,0 +1,95 @@
+# ArcoreHub control plane: what ArcoreHub talks to directly over pinned TLS.
+# Same image as the portal, serving only hubauthority.control_urls (/healthz,
+# /v1/config). It reads published, already-signed configurations from the portal
+# database and holds no signing key. Tailnet only:
+#   https://fleet-control.example-tailnet.ts.net:30443
+#
+# Why not the portal's public hostname: Cloudflare terminates TLS there with its
+# own rotating certificates, which ArcoreHub cannot pin, and Cloudflare Access would
+# stop the Hub. Production reach for customers outside the tailnet is an open decision
+# (see portal/README.md, ArcoreHub authority).
+#
+# Secrets (never committed), created once - see portal/README.md:
+#   portal-db           the portal database (read-only use here)
+#   hub-authority-tls   kubernetes.io/tls: the certificate and key whose pin the
+#                       published configuration lists (arcore-trust tls-cert)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hub-authority
+  namespace: apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hub-authority
+  template:
+    metadata:
+      labels:
+        app: hub-authority
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: fleet-control
+      containers:
+        - name: hub-authority
+          image: 192.0.2.10:30500/portal:latest # CI pins this to the commit sha
+          ports:
+            - containerPort: 8443
+          env:
+            - name: PORTAL_ROLE
+              value: "hub-authority"
+            - name: DJANGO_ROOT_URLCONF
+              value: "hubauthority.control_urls"
+            - name: DJANGO_ALLOWED_HOSTS
+              value: "fleet-control.example-tailnet.ts.net"
+          envFrom:
+            - secretRef:
+                name: portal-db
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/hub-tls
+              readOnly: true
+          # TCP probes: the Host allowlist would refuse kubelet's pod-IP HTTP probes.
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8443
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+      volumes:
+        - name: tls
+          secret:
+            secretName: hub-authority-tls
+
+---
+# Reached through fleet-control's tailnet address. Like portal-auth (30480), NodePorts
+# are not reachable from the internet: the Oracle security list admits no inbound
+# traffic, and Cloudflare only routes *.example.com names into the tunnel.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hub-authority
+  namespace: apps
+spec:
+  type: NodePort
+  selector:
+    app: hub-authority
+  ports:
+    - port: 8443
+      targetPort: 8443
+      nodePort: 30443

@@ -1,0 +1,15 @@
+{% if form.non_field_errors %}<div class="msg error">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+<div class="form-grid">
+  {% for field in form.visible_fields %}
+  <div class="field">
+    {% if field.field.widget.input_type == 'checkbox' %}
+    <label class="inline">{{ field }} {{ field.label }}</label>
+    {% else %}
+    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+    {{ field }}
+    {% endif %}
+    {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+    {% if field.errors %}<div class="errors">{{ field.errors|join:" " }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>

@@ -1,0 +1,60 @@
+{% extends 'access/base.html' %}
+{% block content %}
+<h1>Your apps</h1>
+<p class="sub">Signed in as {{ user.email|default:user.username }}{% if user.is_staff %} <span class="badge">admin - all apps</span>{% endif %}</p>
+
+{% if user.is_staff %}
+<section aria-label="Fleet administration" class="fleet-shortcuts">
+  <div class="tiles">
+    <a class="tile" href="{% url 'operations' %}" style="--tile: #2563eb">
+      <div class="icon" aria-hidden="true">▥</div>
+      <div class="name">Fleet dashboard</div>
+      <div class="desc">Oracle and homelab CPU, memory, disk and database snapshots, plus application deployment status.</div>
+      <div class="host">View snapshots or poll now</div>
+    </a>
+    <a class="tile" href="{% url 'fleet_settings' %}" style="--tile: #7c3aed">
+      <div class="icon" aria-hidden="true">⚙</div>
+      <div class="name">Fleet settings</div>
+      <div class="desc">Configure servers, polling interval, application environments and user access.</div>
+      <div class="host">Manage Fleet configuration</div>
+    </a>
+    <a class="tile" href="{% url 'website_queue' %}" style="--tile: #0891b2">
+      <div class="icon" aria-hidden="true">✎</div>
+      <div class="name">Website</div>
+      <div class="desc">Review open website pull requests, their CI checks and Vercel previews, and the blog's draft and published posts.</div>
+      <div class="host">Review queue for example.com</div>
+    </a>
+  </div>
+</section>
+<h2>Applications</h2>
+{% endif %}
+
+<div class="tiles" style="margin-bottom: 24px">
+  <a class="tile" href="{% url 'hub' %}" style="--tile: #0d9488">
+    <div class="icon" aria-hidden="true">H</div>
+    <div class="name">ArcoreHub</div>
+    <div class="desc">View your provisioned desktop apps and download your server configuration.</div>
+    <div class="host">{% if user.is_staff %}Manage Hub provisioning{% else %}Your desktop apps{% endif %}</div>
+  </a>
+</div>
+{% if apps %}
+<div class="tiles">
+  {% for app in apps %}
+  <a class="tile{% if not app.is_active %} off{% endif %}" href="{{ app.url }}" style="--tile: {{ app.color }}">
+    <div class="icon">{{ app.icon }}</div>
+    <div class="name">{{ app.name }}{% if app.admin_only %} <span class="badge">admin only</span>{% endif %}{% if not app.is_active %} <span class="badge">inactive</span>{% endif %}</div>
+    {% if app.description %}<div class="desc">{{ app.description }}</div>{% endif %}
+    <div class="host">{{ app.hostname }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  {% if user.is_staff %}
+  No apps registered yet. <a href="{% url 'manage_apps' %}">Register one</a>.
+  {% else %}
+  You don't have access to any apps yet. Ask an administrator to grant you access.
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

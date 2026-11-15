@@ -1,0 +1,9 @@
+# Installed to /etc/cloudflared/config.yml by install-cloudflared.sh
+# (__TUNNEL_ID__ is substituted automatically).
+tunnel: __TUNNEL_ID__
+credentials-file: /etc/cloudflared/__TUNNEL_ID__.json
+
+ingress:
+  - hostname: "*.example.com"
+    service: http://localhost:8880 # ArcoreFleet Traefik; 80 is used by the existing sandbox-traefik stack
+  - service: http_status:404

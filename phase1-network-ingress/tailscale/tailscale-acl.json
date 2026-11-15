@@ -1,0 +1,37 @@
+{
+	// Tags used by ArcoreFleet nodes.
+	"tagOwners": {
+		"tag:homelab":     ["autogroup:admin"],
+		"tag:cloud":       ["autogroup:admin"],
+		"tag:arcorefleet": ["autogroup:admin"],
+		// Ephemeral GitHub Actions runners (Phase 5 CI), tagged by the
+		// Tailscale OAuth client - never a long-lived node.
+		"tag:ci": ["autogroup:admin"],
+	},
+
+	// Allow all ArcoreFleet-tagged nodes to reach each other over the tailnet.
+	"grants": [
+		{
+			"src": ["tag:homelab", "tag:cloud", "tag:arcorefleet"],
+			"dst": ["tag:homelab", "tag:cloud", "tag:arcorefleet"],
+			"ip":  ["*"],
+		},
+		// CI only needs the registry (30500) and the K3s API (6443) on
+		// the cloud node - not full mesh access.
+		{
+			"src": ["tag:ci"],
+			"dst": ["tag:cloud"],
+			"ip":  ["30500", "6443"],
+		},
+	],
+
+	// Allow admin to SSH into any ArcoreFleet node via Tailscale SSH.
+	"ssh": [
+		{
+			"action": "check",
+			"src":    ["autogroup:admin"],
+			"dst":    ["tag:homelab", "tag:cloud", "tag:arcorefleet"],
+			"users":  ["autogroup:nonroot", "root"],
+		},
+	],
+}

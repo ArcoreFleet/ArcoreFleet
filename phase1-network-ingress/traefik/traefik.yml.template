@@ -1,0 +1,40 @@
+# Static Traefik configuration.
+# Terminates plain HTTP on the tailnet; TLS is terminated at Cloudflare's edge
+# and the Tunnel forwards decrypted traffic here, so Traefik itself does not
+# need a certificate resolver.
+
+entryPoints:
+  web:
+    address: ":8880" # host networking: binds directly on the host, no docker port mapping
+  traefik:
+    address: "127.0.0.1:8080" # loopback only - host networking means this binds directly, not via a docker port-publish restriction
+
+api:
+  dashboard: true
+  insecure: true # dashboard entrypoint is bound to 127.0.0.1 in docker-compose.yml
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+  # Watches K3s for standard Ingress objects so apps deployed into the
+  # cluster (Phase 4) get routed automatically - no per-app Traefik file
+  # or label needed. Traefik runs as a plain Docker container outside the
+  # cluster, so this connects to the K3s API the same way `kubectl` would
+  # from outside: a service account token + the cluster's CA cert.
+  kubernetesIngress:
+    endpoint: "https://127.0.0.1:6443" # host networking: same network namespace as the K3s server on this node
+    certAuthFilePath: /etc/traefik/k8s-ca.crt
+    ingressClass: traefik
+    # The token placeholder below is substituted at deploy time (see
+    # phase4-app-template/traefik-k8s-provider/extract-credentials.sh).
+    # Must live in this file, not a CLI flag or env var - Traefik does not
+    # deep-merge a single leaf of a provider block across config sources;
+    # whichever source defines the block's other fields must define all
+    # of them, confirmed by testing both ways against the real cluster.
+    token: "__K8S_SA_TOKEN__"
+
+log:
+  level: INFO
+
+accessLog: {}

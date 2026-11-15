@@ -1,0 +1,97 @@
+# Standardized template for a new app in the "apps" namespace. Copy this
+# file to <app-name>.yaml and replace every <PLACEHOLDER>.
+#
+# Prerequisites: "apps" namespace exists, shared Redis credentials copied in
+# via copy-shared-secrets.sh, Traefik's Kubernetes provider is wired up
+# (traefik-k8s-provider/), and the app's own database + login + "<APP_NAME>-db"
+# Secret were created with ../provision-app.sh <APP_NAME>.
+#
+# After `kubectl apply -f`, the app is reachable at
+# https://<HOSTNAME>.example.com automatically - no Traefik file,
+# Docker label, or tunnel/DNS change needed. The wildcard CNAME (Phase 1)
+# and the Cloudflare Access policy (Phase 1) already cover any new
+# hostname under the root domain.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <APP_NAME>
+  namespace: apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: <APP_NAME>
+  template:
+    metadata:
+      labels:
+        app: <APP_NAME>
+    spec:
+      containers:
+        - name: <APP_NAME>
+          image: <REGISTRY_IP>:30500/<APP_NAME>:<TAG> # push here via Phase 3's registry / Phase 5's CI
+          ports:
+            - containerPort: <CONTAINER_PORT>
+          env:
+            # Shared Redis (Phase 3)
+            - name: REDIS_HOST
+              value: "redis.data.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+          envFrom:
+            # The app's own database on the shared Phase 3 Postgres - its own
+            # login, which can only reach its own database. Never the
+            # Postgres superuser. Created by ../provision-app.sh; provides
+            # POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_HOST / POSTGRES_PORT.
+            - secretRef:
+                name: <APP_NAME>-db
+            - secretRef:
+                name: redis-credentials # provides REDIS_PASSWORD
+          # Strict limits - required for every app so one misbehaving
+          # container can't starve the node or the rest of the fleet.
+          # Tune requests/limits to the app's actual footprint; these are
+          # a conservative starting point for a small internal tool.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: <APP_NAME>
+  namespace: apps
+spec:
+  selector:
+    app: <APP_NAME>
+  ports:
+    - port: 80
+      targetPort: <CONTAINER_PORT>
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: <APP_NAME>
+  namespace: apps
+  annotations:
+    # Per-user access check against the portal (portal/README.md). Users not
+    # granted this app in the portal get a 403 instead of the app.
+    traefik.ingress.kubernetes.io/router.middlewares: portal-auth@file
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: <HOSTNAME>.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: <APP_NAME>
+                port:
+                  number: 80

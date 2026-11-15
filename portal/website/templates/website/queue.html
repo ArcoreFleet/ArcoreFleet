@@ -1,0 +1,64 @@
+{% extends 'access/base.html' %}
+{% block title %}Website - Arcore Portal{% endblock %}
+{% block content %}
+<h1>Website review queue</h1>
+<p class="sub">Open pull requests and blog posts on <a href="https://github.com/{{ repository }}">{{ repository }}</a>. Every change reaches the live site only by merging a pull request: the website's CI checks each one, Vercel builds a preview, and merging to main deploys.</p>
+
+<div class="panel panel-body">
+  <div class="inline operations-controls">
+    <form method="post" action="{% url 'website_refresh' %}">
+      {% csrf_token %}<button class="btn" type="submit" {% if sync.running or sync.pending %}disabled{% endif %}>Refresh now</button>
+    </form>
+    {% if next_release_number %}<span class="note">Next free release number: #{{ next_release_number }}</span>{% endif %}
+  </div>
+  <p class="note">{% if not sync.worker_online %}Website worker not reporting; see WEBSITE.md to install it.{% elif sync.running %}Refresh in progress.{% elif sync.pending %}Refresh queued.{% else %}Website worker online.{% endif %}
+    {% if sync.checked_at %}Snapshot from {{ sync.checked_at|date:"Y-m-d H:i:s T" }}{% if sync.stale %} <span class="badge">stale</span>{% endif %}.{% else %}No snapshot yet.{% endif %} Reload to see completed results.</p>
+  {% if sync.error %}<p class="msg error">{{ sync.error }}</p>{% endif %}
+</div>
+
+<h2>Open pull requests</h2>
+{% if incomplete %}<div class="msg error"><p>This snapshot is incomplete, so no free release number is suggested:</p><ul>{% for reason in incomplete %}<li>{{ reason }}</li>{% endfor %}</ul></div>{% endif %}
+{% for pull in pulls %}
+<section class="panel">
+  <div class="panel-head">
+    <strong><a href="https://github.com/{{ repository }}/pull/{{ pull.number }}">#{{ pull.number }}</a> {{ pull.title }}{% if pull.draft %} <span class="badge">draft</span>{% endif %}</strong>
+    <span class="note">{{ pull.author }} · updated {{ pull.updated_at }}</span>
+  </div>
+  <div class="panel-body">
+    <p>
+      Checks: <span class="badge {% if pull.checks.state == 'failing' %}critical{% elif pull.checks.state != 'passing' %}warning{% endif %}">{{ pull.checks.state }}</span>
+      · quality: <strong>{{ pull.checks.quality }}</strong>
+      · merge state: {{ pull.mergeable_state|default:"unknown" }}
+      · <a href="https://github.com/{{ repository }}/pull/{{ pull.number }}/checks">details</a>
+    </p>
+    <p>{% if pull.preview_url %}<a href="{{ pull.preview_url }}">Open Vercel preview</a>{% else %}<span class="note">No preview deployment reported for this commit yet.</span>{% endif %}
+      · changes: {% for kind in pull.kinds %}<span class="badge">{{ kind }}</span> {% endfor %}({{ pull.files }}{% if pull.files_truncated %}+{% endif %} file{{ pull.files|pluralize }})
+      · <code>{{ pull.branch }}</code> at <code>{{ pull.sha|slice:":7" }}</code></p>
+    {% for post in pull.posts %}
+    <p class="note">Post <code>{{ post.slug }}</code>{% if post.number %} · release #{{ post.number }}{% endif %} · {% if post.draft %}draft{% else %}publishes on merge{% endif %}{% if post.todos %} · <span class="badge warning">{{ post.todos }} TODO( left</span>{% endif %}</p>
+    {% endfor %}
+  </div>
+</section>
+{% empty %}<div class="empty">No open pull requests{% if not sync.checked_at %} (or no snapshot yet){% endif %}.</div>{% endfor %}
+
+<h2>Draft posts on main</h2>
+{% if drafts %}
+<div class="panel scroll"><table>
+  <thead><tr><th>Post</th><th>Release</th><th>Planned date</th><th>Unfinished</th></tr></thead>
+  <tbody>{% for post in drafts %}<tr>
+    <td><a href="https://github.com/{{ repository }}/blob/main/content/blog/{{ post.slug|urlencode:'' }}.md">{{ post.title|default:post.slug }}</a></td>
+    <td>{% if post.number %}#{{ post.number }}{% endif %}</td><td>{{ post.date }}</td>
+    <td>{% if post.todos %}<span class="badge warning">{{ post.todos }} TODO(</span>{% else %}ready to finish{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% else %}<div class="empty">No draft posts on main.</div>{% endif %}
+
+<h2>Published posts</h2>
+<div class="panel scroll"><table>
+  <thead><tr><th>Post</th><th>Track</th><th>Release</th><th>Date</th></tr></thead>
+  <tbody>{% for post in posts %}{% if not post.draft %}<tr>
+    <td><a href="https://github.com/{{ repository }}/blob/main/content/blog/{{ post.slug|urlencode:'' }}.md">{{ post.title|default:post.slug }}</a></td>
+    <td>{{ post.track }}</td><td>{% if post.number %}#{{ post.number }}{% endif %}</td><td>{{ post.date }}</td>
+  </tr>{% endif %}{% empty %}<tr><td colspan="4" class="note">No posts in the snapshot.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

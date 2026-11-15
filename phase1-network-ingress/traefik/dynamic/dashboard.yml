@@ -1,0 +1,19 @@
+# Dashboard router, reachable only from inside the tailnet (CGNAT range 100.64.0.0/10)
+# via http://<ingress-tailscale-ip>:8080/dashboard/
+
+http:
+  middlewares:
+    tailnet-only:
+      ipWhiteList:
+        sourceRange:
+          - "100.64.0.0/10"
+          - "127.0.0.1/32"
+
+  routers:
+    traefik-dashboard:
+      rule: "PathPrefix(`/dashboard`) || PathPrefix(`/api`)"
+      entryPoints:
+        - traefik
+      service: api@internal
+      middlewares:
+        - tailnet-only

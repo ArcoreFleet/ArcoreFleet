@@ -1,0 +1,132 @@
+# Arcore Portal - app tiles, per-user app access, and the forwardAuth
+# endpoint Traefik calls for every gated app. https://portal.example.com
+# (also served at https://arcorefleet.example.com)
+#
+# Secrets (never committed):
+#   portal-db    from phase4-app-template/provision-app.sh portal
+#   portal-env   DJANGO_SECRET_KEY, CF_ACCESS_ADMIN_EMAILS
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal
+  namespace: apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: portal
+  template:
+    metadata:
+      labels:
+        app: portal
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: fleet-control # next to Traefik, which calls /auth/check on every gated request
+      containers:
+        - name: portal
+          image: 192.0.2.10:30500/portal:latest # CI pins this to the commit sha
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DJANGO_ALLOWED_HOSTS
+              # Requests arrive as portal.example.com / arcorefleet.example.com
+              # (Ingress), 127.0.0.1:30480 (Traefik forwardAuth) and the pod IP
+              # (kubelet probes). Only the Ingress routes here publicly, and
+              # absolute links use PORTAL_URL, never the Host header.
+              value: "*"
+            - name: DJANGO_TRUSTED_ORIGINS
+              value: "https://portal.example.com,https://arcorefleet.example.com"
+            - name: PORTAL_URL
+              value: "https://portal.example.com"
+            - name: CF_ACCESS_TEAM_DOMAIN
+              value: "https://example.cloudflareaccess.com"
+            - name: CF_ACCESS_AUD
+              value: "345717bd5dcc3940218a2258f1a0e39eef5324f646502b7237f5ff815be88a8e" # the *.example.com Access app
+          envFrom:
+            - secretRef:
+                name: portal-db
+            - secretRef:
+                name: portal-env
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portal
+  namespace: apps
+spec:
+  selector:
+    app: portal
+  ports:
+    - port: 80
+      targetPort: 8000
+
+---
+# For Traefik's forwardAuth (phase1-network-ingress/traefik/dynamic/portal-auth.yml).
+# Traefik runs outside the cluster with host networking, so it reaches the
+# portal through this NodePort on 127.0.0.1. Not routed publicly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: portal-auth
+  namespace: apps
+spec:
+  type: NodePort
+  selector:
+    app: portal
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30480
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portal
+  namespace: apps
+  # No portal-auth middleware here: everyone who passes Cloudflare Access may
+  # see the portal (their own tiles); management pages require admin.
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: portal.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: portal
+                port:
+                  number: 80
+    # Same portal under the fleet's name.
+    - host: arcorefleet.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: portal
+                port:
+                  number: 80

@@ -1,0 +1,7 @@
+# BuildKit refuses to push to a registry over plain HTTP by default, same
+# as Docker/containerd elsewhere in this project. Replace
+# <REGISTRY_TAILSCALE_IP> and pass this file to docker/setup-buildx-action
+# via its `config` input.
+[registry."<REGISTRY_TAILSCALE_IP>:30500"]
+  http = true
+  insecure = true

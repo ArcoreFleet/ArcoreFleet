@@ -1,0 +1,24 @@
+# Optional native Linux exporter. Install the official node_exporter binary at
+# /usr/local/bin/node_exporter and create a non-login node-exporter service user.
+# Replace 100.x.y.z with THIS server's Tailscale IP. Install separately on each host.
+# In ExecStart, escape regex end markers as $$ for systemd, e.g. ^(/|/srv/data)$$.
+# Permit TCP 9100 only from the collector via tailnet ACL/firewall. No public route.
+[Unit]
+Description=Fleet host performance exporter
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=node-exporter
+Group=node-exporter
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=100.x.y.z:9100 --collector.disable-defaults --collector.cpu --collector.meminfo --collector.filesystem --collector.uname --collector.filesystem.mount-points-include=^/$$
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+MemoryMax=64M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target

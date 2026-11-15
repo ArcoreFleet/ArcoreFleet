@@ -1,0 +1,95 @@
+{% extends 'access/base.html' %}
+{% block title %}Fleet dashboard - Arcore Portal{% endblock %}
+{% block content %}
+<h1>Fleet dashboard</h1>
+<p class="sub">Workflow, Deployment and test observations. Results are snapshots; a passing test may cover a different revision from the deployed image.</p>
+<div class="panel panel-body">
+  <div class="inline operations-controls">
+    <form method="get" class="inline">{{ server_form.server.label_tag }} {{ server_form.server }}<button class="btn ghost" type="submit">View</button></form>
+    <form method="post" action="{% url 'poll_operations' %}">
+      {% csrf_token %}<input type="hidden" name="server" value="{{ selected_server.pk|default:'' }}">
+      <button class="btn" type="submit" {% if poll.running or poll.pending %}disabled{% endif %}>Poll now{% if selected_server %}: {{ selected_server.name }}{% else %}: all{% endif %}</button>
+    </form>
+    <span class="note">Automatic interval: {{ poll.interval_minutes }} minutes</span>
+    <a href="{% url 'fleet_settings' %}">Dashboard settings</a>
+  </div>
+  <p class="note">{% if not poll.worker_online %}Collector not reporting; install or check the collector before requesting a poll.{% elif poll.running %}Poll in progress.{% elif poll.pending %}Poll queued.{% else %}Collector online.{% endif %} {% if poll.completed_at %}Last finished {{ poll.completed_at|date:"Y-m-d H:i:s T" }}. Source failures: {{ poll.failures }}.{% endif %} Reload to see completed results.</p>
+</div>
+<h2>Server performance</h2>
+{% for server in servers %}
+<section class="panel">
+  <div class="panel-head"><strong>{{ server.name }}{% if not server.enabled %} <span class="badge">disabled</span>{% endif %}</strong><span class="note">{% if server.checked_at %}Checked {{ server.checked_at|date:"Y-m-d H:i:s T" }}{% else %}Never checked{% endif %}{% if server.stale %} <span class="badge">stale</span>{% endif %} · <a href="{% url 'edit_server' server.pk %}">Configure</a></span></div>
+  <div class="panel-body">
+    {% with source=server.snapshot %}
+    {% if source.error %}<p class="msg error">{{ source.error }}</p>{% endif %}
+    {% if source.data %}
+    <p class="note">Host {{ source.data.hostname }} · Observed {{ source.last_success_at }}</p>
+    <div class="operations-grid">
+      <div><h3>CPU <span class="badge {{ source.data.cpu_pressure }}">{{ source.data.cpu_pressure }}</span></h3><p>{{ source.data.cpu_percent }}% busy · {{ source.data.cpu_count }} logical CPUs</p><p class="note">{{ source.data.sample_seconds }}s sample · {{ source.data.steal_percent }}% steal time</p></div>
+      <div><h3>Memory <span class="badge {{ source.data.memory_pressure }}">{{ source.data.memory_pressure }}</span></h3><p>{{ source.data.memory_percent }}% used</p><p class="note">{{ source.data.memory_used|filesizeformat }} used / {{ source.data.memory_total|filesizeformat }} total · {{ source.data.memory_available|filesizeformat }} available</p></div>
+      {% for disk in source.data.disks %}<div><h3>Disk {{ disk.mountpoint }} <span class="badge {{ disk.pressure }}">{{ disk.pressure }}</span></h3><p>{{ disk.percent }}% used · {{ disk.available|filesizeformat }} available</p><p class="note">{{ disk.used|filesizeformat }} used / {{ disk.total|filesizeformat }} total</p></div>{% endfor %}
+    </div>
+    {% if source.data.database %}
+    <h3>Oracle database storage</h3>
+    {% with db=source.data.database %}
+    {% if db.error %}<p class="msg error">{{ db.error }}</p>{% else %}
+    <p>{{ db.allocated|filesizeformat }} allocated · Source report {{ db.collected_at }} {% if db.stale %}<span class="badge warning">source report stale</span>{% endif %}</p>
+    <p class="note">Reuses the existing hourly database collector. Refreshing this page or polling does not query Oracle.</p>
+    <div class="operations-grid">{% for space in db.tablespaces %}<div><strong>{{ space.name }}</strong> <span class="badge {{ space.pressure }}">{{ space.percent }}% used</span></div>{% endfor %}</div>
+    {% endif %}
+    {% endwith %}
+    {% endif %}
+    {% else %}<p class="note">No performance snapshot collected yet.</p>{% endif %}
+    {% endwith %}
+  </div>
+</section>
+{% empty %}<div class="empty">No servers configured. Add the Oracle host and any homelab server using their private or Tailscale metrics URLs.</div>{% endfor %}
+<h2>Application environments</h2>
+{% for target in targets %}
+<section class="panel">
+  <div class="panel-head">
+    <strong>{{ target.application.name }} / {{ target.name }}</strong>
+    <span class="note">{% if target.checked_at %}Checked {{ target.checked_at|date:"Y-m-d H:i:s T" }}{% else %}Never checked{% endif %}{% if target.stale %} <span class="badge">stale</span>{% endif %}</span>
+  </div>
+  <div class="panel-body">
+    <p><a href="{{ target.application.url }}">{{ target.application.hostname }}</a>{% if target.application.repository %} · <a href="https://github.com/{{ target.application.repository }}">{{ target.application.repository }}</a>{% endif %} · <a href="{% url 'edit_app' target.application_id %}#environments">Configure environment</a></p>
+    <div class="operations-grid">
+      <div>
+        <h2>Latest workflow</h2>
+        {% with source=target.snapshot.workflow %}
+        {% if source.data %}
+        <p>{% if source.data.url %}<a href="{{ source.data.url }}">{{ source.data.name }}</a>: {% endif %}{{ source.data.status }}</p>
+        {% if source.data.sha %}<p class="note">Revision <code>{{ source.data.sha }}</code> · {{ source.data.updated_at }}</p>{% endif %}
+        {% endif %}
+        {% if source.error %}<p class="msg error">{{ source.error }}</p>{% endif %}
+        <p class="note">{% if source.last_success_at %}Observed {{ source.last_success_at }}{% else %}No observation{% endif %}</p>
+        {% endwith %}
+      </div>
+      <div>
+        <h2>Kubernetes rollout</h2>
+        <p class="note">{{ target.namespace }} / {{ target.deployment|default:"not configured" }}</p>
+        {% with source=target.snapshot.rollout %}
+        {% if source.data %}
+        <p>{{ source.data.status }} · {{ source.data.ready }}/{{ source.data.desired }} ready</p>
+        <p class="note">Image <code>{{ source.data.image }}</code></p>
+        <p class="note">Image commit tag: <code>{{ source.data.sha|default:"unknown (no commit tag)" }}</code></p>
+        {% endif %}
+        {% if source.error %}<p class="msg error">{{ source.error }}</p>{% endif %}
+        <p class="note">{% if source.last_success_at %}Observed {{ source.last_success_at }}{% else %}No observation{% endif %}</p>
+        {% endwith %}
+      </div>
+      <div>
+        <h2>BrowserForge tests</h2>
+        {% with source=target.snapshot.tests %}
+        {% if source.data %}<p>{{ source.data.status }}</p>{% if source.data.id %}<p class="note">Run {{ source.data.id }} · Revision <code>{{ source.data.ref }}</code> · {{ source.data.created_at }}</p>{% endif %}{% endif %}
+        {% if source.error %}<p class="msg error">{{ source.error }}</p>{% endif %}
+        <p class="note">{% if source.last_success_at %}Observed {{ source.last_success_at }}{% else %}No observation{% endif %}</p>
+        {% endwith %}
+      </div>
+    </div>
+  </div>
+</section>
+{% empty %}
+<div class="empty">No environments configured. Add a repository and observed environments in <a href="{% url 'manage_apps' %}">Applications</a>.</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends 'access/base.html' %}
+{% block title %}ArcoreHub - Arcore Portal{% endblock %}
+{% block content %}
+<h1>ArcoreHub</h1>
+{% if user.is_staff %}<p><a class="btn" href="{% url 'hub_provisioning' %}">Manage app provisioning</a> <span class="badge">admin only</span></p>{% endif %}
+<section class="panel">
+  <div class="panel-head"><strong>Your provisioned apps</strong></div>
+  <div class="panel-body">
+    {% for provision in provisions %}
+      <article><h3>{{ provision.application.name }}</h3><p>{{ provision.application.description }}</p><p class="note">{{ provision.application.app_id }} · Assigned by your administrator</p></article>
+    {% empty %}<p>No apps have been provisioned for your account yet. Ask your administrator to assign an app.</p>{% endfor %}
+    <p class="note">Assignments are managed here. Desktop app installation and account sign-in are not yet available in the current Hub preview. Importing a server profile does not grant app access.</p>
+  </div>
+</section>
+<p class="sub">ArcoreHub runs Arcore apps on your Windows PC. Install it from the release page, then open the profile below so it knows which server it belongs to. The profile holds only public settings: it does nothing until you sign in from ArcoreHub.</p>
+
+<section class="panel">
+  <div class="panel-head"><strong>Your profile</strong>{% if latest %}<span class="note">{{ latest.authority_id }} · {{ latest.environment }} · version {{ latest.version }}</span>{% endif %}</div>
+  <div class="panel-body">
+    {% if latest %}
+      <p><a class="btn" href="{% url 'hub_profile' %}" download>Download ArcoreHub profile</a></p>
+      <p class="note">Valid until {{ latest_expires }}. ArcoreHub refreshes it automatically from the server before then.</p>
+      {% if latest.environment == 'dev' %}<p class="note">This is the <strong>development</strong> authority. Only development builds of ArcoreHub accept it.</p>{% endif %}
+    {% else %}
+      <p class="note">No configuration has been published yet{% if not user.is_staff %}; ask an administrator{% endif %}.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if user.is_staff %}
+<section class="panel">
+  <div class="panel-head"><strong>Signing</strong></div>
+  <div class="panel-body">
+    {% if signer %}
+      <p>Configuration key <code>{{ signer.key_id }}</code> may sign for authority <code>{{ signer.authority_id }}</code> ({{ signer.environment }}) until <strong>{{ delegation_expires }}</strong>.</p>
+      <p class="note">The root key that granted this stays offline. Ask its holder for a new delegation before it expires.</p>
+    {% else %}
+      <div class="msg error">Cannot sign: {{ signer_error }}</div>
+      <p class="note">Set <code>HUB_CONFIG_KEY</code> and <code>HUB_CONFIG_DELEGATION</code> in the <code>portal-env</code> Secret; see the README.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><strong>Publish configuration</strong><span class="note">Creates the next version; Hubs never accept an older one.</span></div>
+  <div class="panel-body">
+    <form method="post" class="stacked">
+      {% csrf_token %}
+      {% for field in form %}
+        <p>
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<span class="note">{{ field.help_text }}</span>{% endif %}
+          {% for error in field.errors %}<span class="msg error">{{ error }}</span>{% endfor %}
+        </p>
+      {% endfor %}
+      {% for error in form.non_field_errors %}<div class="msg error">{{ error }}</div>{% endfor %}
+      <button class="btn" type="submit"{% if not signer %} disabled{% endif %}>Sign and publish</button>
+    </form>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><strong>Published versions</strong></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Version</th><th>Endpoints</th><th>Pins</th><th>By</th><th>Published</th></tr></thead>
+      <tbody>{% for v in versions %}<tr>
+        <td>{{ v.version }}</td>
+        <td>{% for e in v.endpoints %}<code>{{ e.host }}:{{ e.port }}</code> {% endfor %}</td>
+        <td>{{ v.tls_pins|length }}</td>
+        <td>{{ v.created_by.email|default:"-" }}</td>
+        <td>{{ v.created_at|date:"Y-m-d H:i" }}</td>
+      </tr>{% empty %}<tr><td colspan="5" class="note">Nothing published yet.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

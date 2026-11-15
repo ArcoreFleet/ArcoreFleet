@@ -1,0 +1,7 @@
+ArcoreFleet
+Copyright (c) 2026 Arecore LLC
+
+Licensed under the Elastic License 2.0 (see LICENSE). The infrastructure
+templates in the phase1-* through phase5-* directories are also available,
+at your option, under the Apache License 2.0 (see LICENSE-APACHE in each of
+those directories).
