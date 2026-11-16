@@ -31,7 +31,10 @@ def sync(force: bool = False, tokens: github.InstallationTokens | None = None) -
         return None
     token = uuid4().hex
     available = WebsiteSync.objects.filter(pk=1).filter(Q(lease_until__isnull=True) | Q(lease_until__lte=now))
-    if not available.update(lease_token=token, lease_until=now + timedelta(seconds=300), started_at=now, heartbeat_at=now):
+    if not available.update(
+        lease_token=token,
+        lease_until=now + timedelta(seconds=300), started_at=now, heartbeat_at=now,
+    ):
         raise SyncBusy('Website sync already in progress.')
 
     def renew():

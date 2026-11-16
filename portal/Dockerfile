@@ -9,5 +9,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN DJANGO_SECRET_KEY=collectstatic python manage.py collectstatic --noinput
 
+RUN groupadd --gid 10001 portal && useradd --uid 10001 --gid 10001 --no-create-home portal \
+    && chown portal:portal /app
+USER 10001:10001
+
 EXPOSE 8000
 CMD ["bash", "/app/entrypoint.sh"]

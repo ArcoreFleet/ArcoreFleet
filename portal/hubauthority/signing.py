@@ -82,7 +82,7 @@ def verify(signed: dict, public: bytes) -> dict:
 
 @dataclass(frozen=True)
 class Signer:
-    key: Ed25519PrivateKey
+    key: Ed25519PrivateKey  # gitleaks:allow -- Python type annotation, not a credential
     delegation_signed: dict
     delegation: dict
 

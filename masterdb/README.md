@@ -181,3 +181,14 @@ remained in initialization because the existing apply workers occupied the pool.
 These settings require a standby restart; app primaries continue running.
 After onboarding an app, check that all its `pg_subscription_rel.srsubstate`
 values reach `r`, rather than relying only on an enabled subscription.
+# Non-root sync container
+
+The Oracle sync image runs as UID/GID 10001. Before rebuilding or running it,
+grant that identity read/traverse access to the selected app's `sync.env` and
+the Oracle wallet mounted at `/apps` and `/wallet`. Prefer a dedicated group or
+ACL with directories 0750 and files 0640; do not make credentials world-readable
+or restore root execution to work around permissions. Validate a sync in staging
+with the real mount layout before the next scheduled production sync.
+
+Schema identifiers outside Django's ordinary identifier alphabet are refused
+before DELETE/INSERT begins. Data values remain bound parameters.

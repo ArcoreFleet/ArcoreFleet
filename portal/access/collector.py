@@ -21,7 +21,10 @@ def collect(force=False):
         return None
     token = uuid4().hex
     available = OperationsPoll.objects.filter(pk=1).filter(Q(lease_until__isnull=True) | Q(lease_until__lte=now))
-    if not available.update(lease_token=token, lease_until=now + timedelta(seconds=120), started_at=now, heartbeat_at=now):
+    if not available.update(
+        lease_token=token,
+        lease_until=now + timedelta(seconds=120), started_at=now, heartbeat_at=now,
+    ):
         raise CollectorBusy('Collection already in progress.')
     selected = control.requested_server_id if control.pending and not force else None
     if not selected:

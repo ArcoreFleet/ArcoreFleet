@@ -14,7 +14,8 @@ import os
 import time
 
 import requests
-from django.contrib.auth import get_user_model, login
+from django.contrib.auth import get_user_model, login, logout
+from django.http import HttpResponseForbidden
 from django.utils.crypto import get_random_string
 from jose import JWTError, jwt
 
@@ -103,16 +104,22 @@ class CloudflareAccessMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if is_enabled() and not request.path.startswith(SKIP_PATHS):
-            self._sync_user(request)
+        team, aud = settings_from_env()
+        if (team or aud) and request.path not in SKIP_PATHS:
+            # A partial SSO configuration must not silently enable local login.
+            if not (team and aud) or not self._sync_user(request):
+                logout(request)
+                return HttpResponseForbidden('A valid Cloudflare Access sign-in is required.')
         return self.get_response(request)
 
     def _sync_user(self, request):
         email = email_from_request(request)
         if not email:
-            return
+            return False
         if request.user.is_authenticated and request.user.email.lower() == email.lower():
-            return
+            return request.user.is_active
         user = ensure_user(email)
-        if user.is_active:
-            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        if not user.is_active:
+            return False
+        login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        return True

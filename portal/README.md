@@ -152,3 +152,33 @@ Then, on `/hub/`, publish the endpoint `fleet-control.example-tailnet.ts.net:304
 - **Delegations expire,** after 90 days above. The page shows the date. Re-run `delegate`, update `HUB_CONFIG_DELEGATION`, then publish again.
 - **Rotating the TLS key:** publish a configuration listing both the old and the new pin first, then switch the Secret.
 
+# Security rollout notes
+
+The portal now requires a fresh valid Cloudflare Access assertion on every
+browser request whenever either `CF_ACCESS_TEAM_DOMAIN` or `CF_ACCESS_AUD` is
+configured. Configure both together. A prior Django session cannot replace the
+assertion; invalid assertions clear the session. Health, forward-auth and API-key
+resolution retain their own exact-path authentication behavior. With both SSO
+settings absent, local Django login continues to work.
+
+Session and CSRF cookies default to `Secure`. For **local HTTP development only**,
+set `DJANGO_SECURE_COOKIES=false`. Keep it true in deployed environments.
+`DJANGO_TRUST_PROXY_HTTPS=true` enables `X-Forwarded-Proto` handling only when the
+upstream proxy strips/replaces untrusted forwarded headers and direct access is
+restricted. Verify that proxy behavior before enabling it; this flag alone does
+not establish a trusted proxy boundary.
+
+The image runs as UID/GID 10001. Check mounted-file access for every role before
+rollout. The portal pod no longer mounts a Kubernetes service-account token;
+the separately configured operations collector retains its own identity.
+
+Registry authentication now requires a coordinated rollout. Follow
+[registry authentication](../phase3-data-services/registry/AUTH.md) before
+merging deployment workflows, then use the
+[security checklist](../docs/SECURITY_REMEDIATION.md) to record live verification.
+
+After building portal and sync images, run `python tools/smoke-containers.py
+--portal-image IMAGE --sync-image SYNC_IMAGE` from the repository root. Tests use
+isolated containers, synthetic keys and no published ports. The operations
+collector, when installed, now receives the same digest as the portal after
+migrations; CI does not install its manifest automatically.

@@ -1,0 +1,6 @@
+# Install on EACH server/agent as:
+# /etc/rancher/k3s/config.yaml.d/90-nodeport-addresses.yaml
+# Review NODEPORT-HARDENING.md before restarting either service.
+# IPv4 loopback is required by the host-networked Traefik forwardAuth route.
+kube-proxy-arg+:
+  - "nodeport-addresses=127.0.0.0/8,100.64.0.0/10"

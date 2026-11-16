@@ -1,5 +1,6 @@
 # Optional: pin the image below and apply AFTER the portal has run migrations.
-# Uses existing portal-db and portal-env Secrets. Not applied by CI.
+# Uses existing portal-db and portal-env Secrets. Install manually; CI updates
+# the image by digest once the deployment exists, after portal migrations.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

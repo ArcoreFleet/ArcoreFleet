@@ -1,12 +1,14 @@
 # Builds and deploys the portal (portal/) with the Phase 5 pipeline.
+# Also requires REGISTRY_USERNAME and REGISTRY_PASSWORD; see registry/AUTH.md.
 # Repo secrets: TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET, KUBE_CONFIG_CI.
 
 name: Portal - build and deploy
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-    paths: ["portal/**", "docs/examples/workflows/portal.yml"]
+    paths: ["portal/**", "docs/examples/workflows/portal.yml", "tools/configure-registry-auth.py"]
 
 concurrency:
   group: portal-deploy
@@ -17,11 +19,15 @@ env:
 
 jobs:
   build-and-deploy:
+    # Enable only after the coordinated registry credential rollout.
+    if: vars.FLEET_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
+    env:
+      DOCKER_CONFIG: /tmp/fleet-docker-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
@@ -34,17 +40,25 @@ jobs:
       - name: Join tailnet
         # v2 ran `sudo -E tailscale up`; current runners ignore -E, so the auth key
         # never reached tailscale and the step failed. v4 passes it directly.
-        uses: tailscale/github-action@v4
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
           tags: tag:ci
 
+      - name: Configure registry credentials
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          export REGISTRY="${IMAGE%/*}"
+          python3 tools/configure-registry-auth.py
+
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           driver-opts: network=host
           buildkitd-config: portal/phase5-buildkitd.toml
@@ -52,16 +66,21 @@ jobs:
       - name: Build and push
         run: |
           docker buildx build --platform linux/amd64,linux/arm64 \
-            -t $IMAGE:${{ github.sha }} -t $IMAGE:latest --push portal
+            -t $IMAGE:${{ github.sha }} -t $IMAGE:latest --metadata-file "$RUNNER_TEMP/image-metadata.json" --push portal
+
+      - name: Select immutable deployment image
+        run: |
+          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$RUNNER_TEMP/image-metadata.json")
+          echo "DEPLOY_IMAGE=$IMAGE@$digest" >> "$GITHUB_ENV"
 
       - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
 
       - name: Deploy to K3s
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_CI }}" | base64 -d > ~/.kube/config
-          kubectl -n apps set image deployment/portal portal=$IMAGE:${{ github.sha }}
+          kubectl -n apps set image deployment/portal portal=$DEPLOY_IMAGE
           kubectl -n apps rollout status deployment/portal --timeout=180s
 
       # CI has deployment-update permissions only; installing the credential and
@@ -73,8 +92,18 @@ jobs:
             echo "::warning::Website automatic refresh is unavailable: install the worker and its GitHub App Secret as described in portal/WEBSITE.md."
             exit 0
           fi
-          kubectl -n apps set image deployment/portal-website website=$IMAGE:${{ github.sha }}
+          kubectl -n apps set image deployment/portal-website website=$DEPLOY_IMAGE
           kubectl -n apps rollout status deployment/portal-website --timeout=180s
+
+      - name: Update the operations collector, if installed
+        run: |
+          found=$(kubectl -n apps get deployment portal-operations --ignore-not-found -o name)
+          if [ -z "$found" ]; then
+            echo "::notice::The operations collector is not installed."
+            exit 0
+          fi
+          kubectl -n apps set image deployment/portal-operations collect=$DEPLOY_IMAGE
+          kubectl -n apps rollout status deployment/portal-operations --timeout=180s
 
       - name: Update the ArcoreHub control plane, if installed
         run: |
@@ -83,5 +112,9 @@ jobs:
             echo "::notice::The ArcoreHub control plane is not installed; see portal/README.md (ArcoreHub authority)."
             exit 0
           fi
-          kubectl -n apps set image deployment/hub-authority hub-authority=$IMAGE:${{ github.sha }}
+          kubectl -n apps set image deployment/hub-authority hub-authority=$DEPLOY_IMAGE
           kubectl -n apps rollout status deployment/hub-authority --timeout=180s
+
+      - name: Remove registry credentials
+        if: always()
+        run: rm -f -- "$DOCKER_CONFIG/config.json"

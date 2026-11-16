@@ -10,6 +10,13 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'false').lower() == 'true'
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get('DJANGO_TRUSTED_ORIGINS', '').split(',') if o.strip()]
 
+# HTTPS by default. Explicit local development may opt out for localhost HTTP.
+SESSION_COOKIE_SECURE = os.environ.get('DJANGO_SECURE_COOKIES', 'true').lower() == 'true'
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+# Enable only behind a proxy that strips/replaces client-supplied forwarded headers.
+if os.environ.get('DJANGO_TRUST_PROXY_HTTPS', 'false').lower() == 'true':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',

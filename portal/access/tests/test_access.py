@@ -182,6 +182,53 @@ class AuthCheckTests(TestCase):
         self.assertEqual(self.check('ok@example.com').status_code, 200)
 
 
+@mock.patch('access.cf_access.requests.get', side_effect=fake_certs)
+@mock.patch.dict(os.environ, ENV)
+class BrowserSsoTests(TestCase):
+    def setUp(self):
+        cf_access.JWKS_CACHE.update(keys=None, expires_at=0.0)
+        self.admin = User.objects.create_user('sessionadmin', email='sessionadmin@example.com', is_staff=True)
+        self.client.force_login(self.admin)
+
+    def test_existing_session_cannot_replace_missing_assertion(self, _get):
+        self.assertEqual(self.client.get('/settings/').status_code, 403)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_existing_session_cannot_replace_invalid_assertion(self, _get):
+        response = self.client.get('/settings/', HTTP_CF_ACCESS_JWT_ASSERTION=token(self.admin.email, aud='wrong'))
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_valid_assertion_keeps_admin_access_and_secure_cookie(self, _get):
+        self.client.logout()
+        response = self.client.get('/settings/', HTTP_CF_ACCESS_JWT_ASSERTION=token(self.admin.email))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.cookies['sessionid']['secure'])
+        self.assertTrue(response.cookies['csrftoken']['secure'])
+
+    def test_different_identity_does_not_inherit_admin_session(self, _get):
+        response = self.client.get('/settings/', HTTP_CF_ACCESS_JWT_ASSERTION=token('ordinary@example.com'))
+        self.assertEqual(response.status_code, 302)
+        self.assertNotEqual(self.client.session['_auth_user_id'], str(self.admin.pk))
+
+    def test_inactive_identity_cannot_keep_previous_admin_session(self, _get):
+        User.objects.create_user('disabled', email='disabled@example.com', is_active=False)
+        response = self.client.get('/settings/', HTTP_CF_ACCESS_JWT_ASSERTION=token('disabled@example.com'))
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_partial_sso_configuration_fails_closed(self, _get):
+        with mock.patch.dict(os.environ, {'CF_ACCESS_AUD': ''}):
+            self.assertEqual(self.client.get('/settings/').status_code, 403)
+
+    def test_only_exact_machine_endpoints_are_exempt(self, _get):
+        self.assertEqual(self.client.get('/healthz').status_code, 200)
+        self.assertEqual(self.client.get('/auth/check').status_code, 401)
+        self.assertEqual(self.client.post('/api/keys/resolve').status_code, 503)
+        for path in ('/healthz/admin', '/auth/check-extra', '/api/keys/resolve-extra'):
+            self.assertEqual(self.client.get(path).status_code, 403)
+
+
 class ManageTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_user('admin', email='admin@example.com', password='pw', is_staff=True)

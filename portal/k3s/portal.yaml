@@ -21,10 +21,20 @@ spec:
       labels:
         app: portal
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/hostname: fleet-control # next to Traefik, which calls /auth/check on every gated request
       containers:
         - name: portal
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
           image: 192.0.2.10:30500/portal:latest # CI pins this to the commit sha
           ports:
             - containerPort: 8000

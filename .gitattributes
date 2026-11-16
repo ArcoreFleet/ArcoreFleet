@@ -1,5 +1,4 @@
-portal/host-metrics/*.sh text eol=lf
-tools/*.sh text eol=lf
+*.sh text eol=lf
 .public/*.txt text eol=lf
 .public/*.tsv text eol=lf
 .public/append/** text eol=lf

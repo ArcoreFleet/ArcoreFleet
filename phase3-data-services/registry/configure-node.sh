@@ -8,17 +8,21 @@ set -euo pipefail
 
 REGISTRY="${1:?Usage: $0 <registry-tailscale-ip>:30500}"
 
+# Do not erase authentication (or unrelated registries) during reconfiguration.
+if sudo test -e /etc/rancher/k3s/registries.yaml; then
+  echo "registries.yaml already exists; merge changes securely as described in AUTH.md." >&2
+  exit 1
+fi
+
 sudo mkdir -p /etc/rancher/k3s
 sudo tee /etc/rancher/k3s/registries.yaml > /dev/null <<EOF
 mirrors:
   "${REGISTRY}":
     endpoint:
       - "http://${REGISTRY}"
-configs:
-  "${REGISTRY}":
-    tls:
-      insecure_skip_verify: true
 EOF
+
+echo "Before pulling, merge the node credentials described in AUTH.md."
 
 if systemctl is-active --quiet k3s; then
   sudo systemctl restart k3s

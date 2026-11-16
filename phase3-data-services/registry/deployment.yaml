@@ -23,11 +23,21 @@ spec:
           env:
             - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
               value: /var/lib/registry
+            # Provision registry-auth before applying this deployment; see AUTH.md.
+            - name: REGISTRY_AUTH
+              value: htpasswd
+            - name: REGISTRY_AUTH_HTPASSWD_REALM
+              value: Fleet registry
+            - name: REGISTRY_AUTH_HTPASSWD_PATH
+              value: /auth/htpasswd
           ports:
             - containerPort: 5000
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry
+            - name: auth
+              mountPath: /auth
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -36,6 +46,10 @@ spec:
               cpu: 500m
               memory: 512Mi
       volumes:
+        - name: auth
+          secret:
+            secretName: registry-auth
+            defaultMode: 0400
         - name: data
           persistentVolumeClaim:
             claimName: registry-data

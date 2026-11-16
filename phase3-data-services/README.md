@@ -74,3 +74,10 @@ treats `127.0.0.0/8`/`localhost` as insecure by default. Pushing from any
 other host (e.g. a CI runner later in Phase 5) needs that host's Docker
 configured with `"insecure-registries": ["<fleet-control-tailscale-ip>:30500"]`
 in `/etc/docker/daemon.json`, then `sudo systemctl restart docker`.
+# Registry security prerequisite
+
+Before applying the registry deployment, complete
+[registry authentication rollout](registry/AUTH.md). The deployment requires a
+`registry-auth` Secret, and all producers and pulling nodes need credentials.
+Use digest references for deployed images. Network access to a NodePort must be
+restricted explicitly on every node; removing public ingress does not do that.
